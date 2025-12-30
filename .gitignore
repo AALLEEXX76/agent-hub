@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+artifacts/
+.env
+.agent_env
+
+# backups
+*.bak
+*.bak.*
+*_bak*
+*.bak_*

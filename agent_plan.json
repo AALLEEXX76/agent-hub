@@ -1,0 +1,356 @@
+{
+  "http": [
+    {
+      "description": "Получить список существующих credentials (Telegram и SSH)",
+      "method": "GET",
+      "endpoint": "/credentials",
+      "body": null
+    },
+    {
+      "description": "Получить список workflows для поиска существующего 'II-BOT Executor v1'",
+      "method": "GET",
+      "endpoint": "/workflows",
+      "body": null
+    },
+    {
+      "description": "Создать или обновить workflow 'II-BOT Executor v1 (Telegram → SSH)'",
+      "method": "POST",
+      "endpoint": "/workflows",
+      "body": {
+        "name": "II-BOT Executor v1 (Telegram → SSH)",
+        "active": false,
+        "nodes": [
+          {
+            "parameters": {
+              "updates": [
+                "message"
+              ]
+            },
+            "id": "telegram-trigger",
+            "name": "Telegram Trigger",
+            "type": "n8n-nodes-base.telegramTrigger",
+            "typeVersion": 1,
+            "position": [
+              250,
+              300
+            ],
+            "credentials": {
+              "telegramApi": {
+                "id": "{{TELEGRAM_CRED_ID}}",
+                "name": "Telegram Bot"
+              }
+            }
+          },
+          {
+            "parameters": {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{$json.message.from.id}}",
+                    "operation": "equals",
+                    "value2": "535520922"
+                  },
+                  {
+                    "value1": "={{$json.message.from.id}}",
+                    "operation": "equals",
+                    "value2": "951230951"
+                  }
+                ]
+              },
+              "combineOperation": "any"
+            },
+            "id": "check-admin",
+            "name": "Check Admin",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+              450,
+              300
+            ]
+          },
+          {
+            "parameters": {
+              "chatId": "={{$json.message.chat.id}}",
+              "text": "⛔️ Нет доступа. Этот бот принимает команды только от админов."
+            },
+            "id": "deny-access",
+            "name": "Deny Access",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+              650,
+              450
+            ],
+            "credentials": {
+              "telegramApi": {
+                "id": "{{TELEGRAM_CRED_ID}}",
+                "name": "Telegram Bot"
+              }
+            }
+          },
+          {
+            "parameters": {
+              "functionCode": "const text = $input.item.json.message.text.toLowerCase().trim();\nlet action = 'unknown';\n\nif (text.includes('/status') || text.includes('docker_status')) {\n  action = 'docker_status';\n} else if (text.includes('/health') || text.includes('healthz')) {\n  action = 'healthz';\n} else if (text.includes('/backup')) {\n  action = 'backup_now';\n} else if (text.includes('/restart')) {\n  action = 'restart_n8n';\n} else if (text.includes('/logs') || text.includes('caddy_logs')) {\n  action = 'caddy_logs';\n} else if (text.includes('/confirm') && text.includes('restart_n8n')) {\n  action = 'restart_n8n_confirmed';\n}\n\nreturn {\n  json: {\n    action: action,\n    chatId: $input.item.json.message.chat.id,\n    userId: $input.item.json.message.from.id,\n    originalText: text\n  }\n};"
+            },
+            "id": "parse-command",
+            "name": "Parse Command",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+              650,
+              150
+            ]
+          },
+          {
+            "parameters": {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{$json.action}}",
+                    "operation": "equals",
+                    "value2": "unknown"
+                  }
+                ]
+              }
+            },
+            "id": "check-unknown",
+            "name": "Check Unknown Command",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+              850,
+              150
+            ]
+          },
+          {
+            "parameters": {
+              "chatId": "={{$json.chatId}}",
+              "text": "Доступные команды:\n\n/status - статус контейнеров\n/health - healthcheck\n/backup - создать backup БД\n/restart - перезапустить n8n (требует подтверждения)\n/logs - логи Caddy"
+            },
+            "id": "send-help",
+            "name": "Send Help",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+              1050,
+              250
+            ],
+            "credentials": {
+              "telegramApi": {
+                "id": "{{TELEGRAM_CRED_ID}}",
+                "name": "Telegram Bot"
+              }
+            }
+          },
+          {
+            "parameters": {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{$json.action}}",
+                    "operation": "equals",
+                    "value2": "restart_n8n"
+                  }
+                ]
+              }
+            },
+            "id": "check-restart",
+            "name": "Check Restart Command",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+              1050,
+              50
+            ]
+          },
+          {
+            "parameters": {
+              "chatId": "={{$json.chatId}}",
+              "text": "⚠️ ВНИМАНИЕ! Вы запрашиваете перезапуск n8n.\n\nЭто приведёт к кратковременному отключению всех workflows.\n\nДля подтверждения отправьте:\n/confirm RESTART_N8N"
+            },
+            "id": "restart-warning",
+            "name": "Restart Warning",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+              1250,
+              150
+            ],
+            "credentials": {
+              "telegramApi": {
+                "id": "{{TELEGRAM_CRED_ID}}",
+                "name": "Telegram Bot"
+              }
+            }
+          },
+          {
+            "parameters": {
+              "authentication": "password",
+              "command": "=sudo /usr/local/sbin/iibot {{$json.action}}",
+              "host": "92.51.21.146"
+            },
+            "id": "ssh-execute",
+            "name": "SSH Execute",
+            "type": "n8n-nodes-base.ssh",
+            "typeVersion": 1,
+            "position": [
+              1250,
+              -50
+            ],
+            "credentials": {
+              "sshPassword": {
+                "id": "{{SSH_CRED_ID}}",
+                "name": "SSH Agent"
+              }
+            }
+          },
+          {
+            "parameters": {
+              "functionCode": "let output = $input.item.json.stdout || $input.item.json.stderr || 'Нет вывода';\n\nif (output.length > 3800) {\n  output = output.substring(0, 3800) + '\\n\\n... (обрезано)';\n}\n\nreturn {\n  json: {\n    chatId: $input.item.json.chatId,\n    output: output\n  }\n};"
+            },
+            "id": "format-output",
+            "name": "Format Output",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+              1450,
+              -50
+            ]
+          },
+          {
+            "parameters": {
+              "chatId": "={{$json.chatId}}",
+              "text": "```\n{{$json.output}}\n```"
+            },
+            "id": "send-result",
+            "name": "Send Result",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+              1650,
+              -50
+            ],
+            "credentials": {
+              "telegramApi": {
+                "id": "{{TELEGRAM_CRED_ID}}",
+                "name": "Telegram Bot"
+              }
+            }
+          }
+        ],
+        "connections": {
+          "Telegram Trigger": {
+            "main": [
+              [
+                {
+                  "node": "Check Admin",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          },
+          "Check Admin": {
+            "main": [
+              [
+                {
+                  "node": "Parse Command",
+                  "type": "main",
+                  "index": 0
+                }
+              ],
+              [
+                {
+                  "node": "Deny Access",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          },
+          "Parse Command": {
+            "main": [
+              [
+                {
+                  "node": "Check Unknown Command",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          },
+          "Check Unknown Command": {
+            "main": [
+              [
+                {
+                  "node": "Send Help",
+                  "type": "main",
+                  "index": 0
+                }
+              ],
+              [
+                {
+                  "node": "Check Restart Command",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          },
+          "Check Restart Command": {
+            "main": [
+              [
+                {
+                  "node": "Restart Warning",
+                  "type": "main",
+                  "index": 0
+                }
+              ],
+              [
+                {
+                  "node": "SSH Execute",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          },
+          "SSH Execute": {
+            "main": [
+              [
+                {
+                  "node": "Format Output",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          },
+          "Format Output": {
+            "main": [
+              [
+                {
+                  "node": "Send Result",
+                  "type": "main",
+                  "index": 0
+                }
+              ]
+            ]
+          }
+        },
+        "settings": {
+          "executionOrder": "v1"
+        }
+      }
+    },
+    {
+      "description": "Активировать workflow",
+      "method": "PATCH",
+      "endpoint": "/workflows/{{WORKFLOW_ID}}",
+      "body": {
+        "active": true
+      }
+    }
+  ],
+  "comment": "План: 1) Получить credentials (Telegram bot и SSH agent), 2) Получить список workflows для проверки существования, 3) Создать/обновить workflow с логикой: Telegram trigger → проверка admin ID → парсинг команды → обработка restart с подтверждением → SSH-выполнение через iibot → форматирование и отправка результата в Telegram, 4) Активировать workflow. Плейсхолдеры {{TELEGRAM_CRED_ID}}, {{SSH_CRED_ID}}, {{WORKFLOW_ID}} должны быть заменены реальными ID из шагов 1-2."
+}
