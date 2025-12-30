@@ -30,7 +30,7 @@ def eprint(*args: Any) -> None:
 
 def load_env() -> None:
     # Загружаем твой эталонный env (как ты описал)
-    load_dotenv(os.path.expanduser("~/agent-hub/.agent_env"), override=True)
+    load_dotenv(os.path.expanduser("~/agent-hub/.agent_env"), override=False)
     # На всякий случай поддержим .env рядом со скриптом
     load_dotenv(override=False)
 
@@ -330,8 +330,17 @@ def main() -> int:
             eprint("[exec] caddy_logs ERROR:", ex)
 
     print("\n[report] done.")
-
-    print(json.dumps({"summary": summary, "results": results}, ensure_ascii=False, indent=2))
-    return 0
+    overall_ok = True
+    for it in results:
+        if isinstance(it, dict) and it.get("error"):
+            overall_ok = False
+            break
+        resp = it.get("response") if isinstance(it, dict) else None
+        if isinstance(resp, dict) and resp.get("ok") is False:
+            overall_ok = False
+            break
+    report = {"ok": overall_ok, "exit_code": 0 if overall_ok else 1, "summary": summary, "results": results}
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return report["exit_code"]
 if __name__ == "__main__":
     raise SystemExit(main())

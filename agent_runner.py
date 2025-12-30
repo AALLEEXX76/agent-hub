@@ -66,24 +66,23 @@ def short_summary(brain_stdout: str, brain_stderr: str = "", ok: bool = True, ex
     """
     Достаём 1-2 строки итога.
     Приоритет:
-      1) строка после "[plan] summary:" из stdout
-      2) если ошибка — хвост stderr (например, "ANTHROPIC_API_KEY not found")
+      1) если ошибка (ok=false) — первая информативная строка stderr
+      2) иначе строка после "[plan] summary:" из stdout
       3) запасной вариант
     """
-    for line in (brain_stdout or "").splitlines():
-        if line.startswith("[plan] summary:"):
-            s = line.split(":", 1)[1].strip()
-            return (s[:240] if s else "done")
-
     if not ok:
-        tail = (brain_stderr or "").strip().splitlines()[-1:]  # последняя строка
-        msg = tail[0] if tail else (brain_stderr or "").strip()
-        msg = msg.strip()
-        if msg:
-            return (msg[:240])
+        lines = [ln.strip() for ln in (brain_stderr or "").splitlines() if ln.strip()]
+        if lines:
+            return lines[0][:240]
         return f"error (exit_code={exit_code})"
 
+    for line in (brain_stdout or "").splitlines():
+        if line.startswith("[plan] summary:"):
+            msg = line.split(":", 1)[1].strip()
+            return (msg[:240] if msg else "done")
+
     return "done"
+
 
 
 
