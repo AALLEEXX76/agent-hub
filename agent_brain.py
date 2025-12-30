@@ -335,6 +335,9 @@ def main() -> int:
         if isinstance(it, dict) and it.get("error"):
             overall_ok = False
             break
+        if isinstance(it, dict) and it.get("skipped"):
+            overall_ok = False
+            break
         resp = it.get("response") if isinstance(it, dict) else None
         if isinstance(resp, dict) and resp.get("ok") is False:
             overall_ok = False

@@ -74,6 +74,13 @@ def short_summary(brain_stdout: str, brain_stderr: str = "", ok: bool = True, ex
         lines = [ln.strip() for ln in (brain_stderr or "").splitlines() if ln.strip()]
         if lines:
             return lines[0][:240]
+        # если stderr пустой — вытащим причину из stdout (например, "SKIP (dangerous)")
+        for ln in (brain_stdout or "").splitlines():
+            t = ln.strip()
+            if "SKIP (dangerous)" in t:
+                return t[:240]
+            if t.startswith("[exec") and "ERROR" in t:
+                return t[:240]
         return f"error (exit_code={exit_code})"
 
     for line in (brain_stdout or "").splitlines():
