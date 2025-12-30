@@ -146,6 +146,7 @@ def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str,
         '  "finish": {"status":"done|need_more_info","message":"короткий итог","questions":[...]}\n'
         "}\n\n"
         "Правила:\n"
+        "- Если в запросе есть фраза \"только если есть проблема / only if problem\": НЕ ставь need_more_info. Всегда выполни базовые проверки (docker_status и healthz), а caddy_logs добавляй ТОЛЬКО если базовые проверки показали проблему.\n"
         "- Делай МИНИМУМ действий, которые реально нужны.\n"
         "- Не придумывай новые task.\n"
         "- Если не хватает данных — ставь finish.status=need_more_info и задай вопросы.\n"
