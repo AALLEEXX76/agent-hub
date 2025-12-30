@@ -263,7 +263,7 @@ def main() -> int:
         eprint("[plan raw]:", json.dumps(plan, ensure_ascii=False, indent=2))
         return 1
 
-    if finish.get("status") == "need_more_info":
+    if finish.get("status") == "need_more_info" and not wants_conditional_logs(user_task):
         print("\n[plan] need_more_info:", finish.get("message", ""))
         qs = finish.get("questions", [])
         if isinstance(qs, list) and qs:
