@@ -438,11 +438,10 @@ def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str,
         "СТРОГОЕ ТРЕБОВАНИЕ: верни ТОЛЬКО валидный JSON-объект, без markdown и без пояснений вокруг.\n\n"
         "Разрешённые действия (task):\n"
         "- ssh: docker_status\n"
+        "- ssh: run\n"
         "- ssh: healthz\n"
         "- ssh: backup_now\n"
-        "- ssh: caddy_logs\n"
-        "- ssh: compose_ps\n"
-        "- ssh: restart_n8n\n"
+        "- ssh: caddy_logs\n"        "- ssh: restart_n8n\n"
         "- n8n: self_test\n"
         "- n8n: workflows_get (params: workflow_id)\n- n8n: workflows_get_dryrun (params: workflow_id, no write)\n\n"
         "Формат ответа JSON:\n"
@@ -461,6 +460,8 @@ def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str,
         "- НИКОГДА не возвращай пустой actions: минимум 1 действие всегда.\n"
         "- Если пользователь просит WRITE, но N8N_ALLOW_WRITE=0: добавь read-only действие n8n: get_workflow (с params.workflow_id), а в finish.message объясни, что WRITE заблокирован.\n"
         "- Для docker compose ps используй ТОЛЬКО task \"ssh: compose_ps\" (без params), он по умолчанию проверяет проект \"/opt/n8n\".\n"
+        "- Для task \"ssh: run\" поле params ОБЯЗАТЕЛЬНО: {\\\"action\\\":...,\\\"mode\\\":\\\"check|plan|apply\\\",\\\"args\\\":{...}}.\n"
+        "- Для docker compose ps используй ТОЛЬКО task \"ssh: run\" с params: {\\\"action\\\":\\\"compose_ps\\\",\\\"mode\\\":\\\"check\\\",\\\"args\\\":{\\\"project_dir\\\": \\\"/opt/n8n\\\"}}. Если путь указан пользователем — подставь его в args.project_dir.\n"
         "- Не придумывай новые task.\n"
         "- Если не хватает данных — ставь finish.status=need_more_info и задай вопросы.\n"
     )
@@ -733,23 +734,86 @@ def main() -> int:
         params = a.get('params') or {}
         reason = a.get('reason', '')
 
-        # ssh: run shim (until Hand v2 is deployed on server)
+        # ssh: run (Hand v2 preferred; legacy fallback)
         if task == 'ssh: run':
             action = (params or {}).get('action')
+            mode = str((params or {}).get('mode') or 'check').strip().lower()
+            args = (params or {}).get('args') or {}
+
             if not action:
                 issue_found = True
                 results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'params.action required for ssh: run', 'text': 'params.action required for ssh: run', 'exit_code': 1}})
                 eprint(f"[exec #{i}] ERROR: params.action required for ssh: run")
                 continue
 
-            args = (params or {}).get('args')
-            if args not in (None, {}, ''):
+            if mode not in ('check','plan','apply'):
                 issue_found = True
-                results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'params.args not supported yet for ssh: run', 'text': 'params.args not supported yet for ssh: run', 'exit_code': 1}})
-                eprint(f"[exec #{i}] ERROR: params.args not supported yet for ssh: run")
+                results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'invalid params.mode (use check|plan|apply)', 'text': 'invalid params.mode (use check|plan|apply)', 'exit_code': 1}})
+                eprint(f"[exec #{i}] ERROR: invalid params.mode for ssh: run")
                 continue
 
-            action = str(action).strip()
+            if not isinstance(args, dict):
+                issue_found = True
+                results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'params.args must be an object', 'text': 'params.args must be an object', 'exit_code': 1}})
+                eprint(f"[exec #{i}] ERROR: params.args must be an object")
+                continue
+
+            raw_action = str(action).strip()
+
+            action = raw_action
+
+            hv2_action = raw_action
+
+            if raw_action.startswith('ssh:'):
+
+                hv2_action = raw_action.split(':', 1)[1].strip()
+
+
+            # Decide whether to use Hand v2 (ssh: run)
+            # If args is provided — MUST use Hand v2 (legacy ssh:* has no args support).
+            use_hv2 = bool(args)
+
+            try:
+                hv2 = set(handv2_actions)
+            except Exception:
+                hv2 = set()
+
+            if hv2 and action in hv2:
+                use_hv2 = True
+
+            if use_hv2:
+                print(f"\n[exec #{i}] ssh: run → {action} ({mode})")
+                if reason:
+                    print(f"[exec #{i}] reason: {reason}")
+
+                out_raw = call_agent_exec(
+                    agent_exec_url,
+                    "ssh: run",
+                    chat_id,
+                    params={"action": action, "mode": mode, "args": args},
+                )
+                out_norm = normalize_exec_response("ssh: run", out_raw)
+                out = sanitize_response("ssh: run", out_norm)
+                results.append({"task": "ssh: run", "params": {"action": action, "mode": mode, "args": args}, "response": out})
+
+                print(f"[exec #{i}] ok={out.get('ok')} action={out.get('action')}")
+                stdout = (out.get('stdout') or '')
+                stderr = (out.get('stderr') or '')
+                if stdout:
+                    print(f"[exec #{i}] stdout:", stdout[:600])
+                if stderr:
+                    print(f"[exec #{i}] stderr:", stderr[:600])
+                if not out.get('ok', False):
+                    issue_found = True
+                continue
+
+            # Legacy fallback (no args support)
+            if args not in (None, {}, ''):
+                issue_found = True
+                results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'legacy ssh:* fallback does not support params.args', 'text': 'legacy ssh:* fallback does not support params.args', 'exit_code': 1}})
+                eprint(f"[exec #{i}] ERROR: legacy ssh:* fallback does not support params.args")
+                continue
+
             resolved_task = action if action.startswith('ssh:') else f"ssh: {action}"
             if resolved_task not in ALLOWED_TASKS:
                 issue_found = True
@@ -758,8 +822,8 @@ def main() -> int:
                 continue
 
             task = resolved_task
-            params = {}  # старые ssh:* задачи не используют params
-            print(f"[exec #{i}] ssh: run → {task}")
+            params = {}
+            print(f"[exec #{i}] ssh: run → {task} (legacy)")
 
         print(f"\n[exec #{i}] {task}")
         if reason:
