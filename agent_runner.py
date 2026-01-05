@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import json
 import subprocess
 import sys
@@ -11,6 +12,46 @@ from json import JSONDecoder
 
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts"
 BRAIN = Path(__file__).resolve().parent / "agent_brain.py"
+
+ENV_FILE = Path(__file__).resolve().parent / ".agent_env"
+
+def _parse_env_file(path: Path) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    try:
+        txt = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return out
+
+    for raw in txt.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if not k:
+            continue
+        # strip surrounding quotes
+        if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
+            v = v[1:-1]
+        out[k] = v
+    return out
+
+_CHILD_ENV: Optional[Dict[str, str]] = None
+
+def _get_child_env() -> Dict[str, str]:
+    global _CHILD_ENV
+    if _CHILD_ENV is None:
+        env = os.environ.copy()
+        # don't override already-set env vars; allow CLI overrides
+        for k, v in _parse_env_file(ENV_FILE).items():
+            env.setdefault(k, v)
+        _CHILD_ENV = env
+    return _CHILD_ENV
 
 
 def run_brain(task_text: str) -> Dict[str, Any]:
@@ -24,6 +65,7 @@ def run_brain(task_text: str) -> Dict[str, Any]:
         [sys.executable, str(BRAIN), task_text],
         capture_output=True,
         text=True,
+        env=_get_child_env(),
     )
     return {
         "ok": p.returncode == 0,

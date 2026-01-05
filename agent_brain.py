@@ -13,14 +13,113 @@ from dotenv import load_dotenv
 from anthropic import Anthropic
 
 
+# Hand v2 manifests cache (self-discovery)
+HANDV2_MANIFESTS_CACHE = Path(__file__).resolve().parent / "artifacts" / "handv2_manifests_cache.json"
+
+def load_handv2_manifests_cache() -> Optional[List[Dict[str, Any]]]:
+    try:
+        import json as _json
+        data = _json.loads(HANDV2_MANIFESTS_CACHE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else None
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+def _extract_manifests_from_list_actions(resp: Any) -> Optional[List[Dict[str, Any]]]:
+    try:
+        arts = (resp or {}).get("artifacts") or []
+        for a in arts:
+            if isinstance(a, dict) and a.get("type") == "json" and a.get("name") == "manifests":
+                v = a.get("value")
+                if isinstance(v, list):
+                    return v
+    except Exception:
+        return None
+    return None
+
+def refresh_handv2_manifests(agent_exec_url: str, chat_id: Optional[int]) -> Optional[List[Dict[str, Any]]]:
+    try:
+        out = call_agent_exec(
+            agent_exec_url,
+            "ssh: run",
+            chat_id,
+            params={"action": "list_actions", "mode": "check", "args": {}},
+            timeout_s=30,
+        )
+    except Exception:
+        return None
+
+    try:
+        norm = normalize_exec_response("ssh: run", out)
+    except Exception:
+        norm = out
+
+    manifests = _extract_manifests_from_list_actions(norm)
+    if not manifests:
+        return None
+
+    try:
+        import json as _json
+        HANDV2_MANIFESTS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        HANDV2_MANIFESTS_CACHE.write_text(_json.dumps(manifests, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+    return manifests
+
+
+def _parse_direct_ssh_run(task_text: str) -> Optional[Dict[str, Any]]:
+    """Direct CLI mode: ssh: run action=... mode=check|plan|apply [args=<json-no-spaces>]."""
+    t = (task_text or "").strip()
+    m = re.match(r"^ssh\s*:\s*run\b\s*:?(.*)$", t, flags=re.IGNORECASE)
+    if not m:
+        return None
+    rest = (m.group(1) or "").strip()
+    kv: Dict[str, str] = {}
+    for part in rest.split():
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        kv[k.strip().lower()] = v.strip()
+
+    action = kv.get("action")
+    if not action:
+        return None
+    mode = (kv.get("mode") or "check").strip().lower()
+    if mode not in {"check","plan","apply"}:
+        mode = "check"
+
+    args = {}
+    if "args" in kv:
+        try:
+            args = json.loads(kv["args"])
+            if not isinstance(args, dict):
+                args = {}
+        except Exception:
+            args = {}
+
+    return {"task": "ssh: run", "params": {"action": action, "mode": mode, "args": args}}
+
 ALLOWED_TASKS = {
     "ssh: docker_status",
     "ssh: healthz",
     "ssh: backup_now",
     "ssh: caddy_logs",
+    "ssh: list_actions",
     "ssh: restart_n8n",
+    "ssh: run",
+    # n8n api (read-only by default; write gated by N8N_ALLOW_WRITE)
+    "n8n: self_test",
+    "n8n: workflows_get",
+    "n8n: get_workflow",
+    "n8n: list_workflows",
+    "n8n: workflows_update",
+    "n8n: workflows_update_dryrun",
+    "n8n: workflows_get_dryrun",
+    "n8n: executions_list",
+    "ssh: compose_ps",
 }
-
 DANGEROUS_TASKS = {"ssh: restart_n8n"}
 
 
@@ -77,7 +176,12 @@ def validate_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
         reason = a.get("reason", "")
         if reason is None:
             reason = ""
-        normalized.append({"task": task, "reason": str(reason)})
+        params = a.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ValueError(f"Action #{i} params must be an object.")
+        normalized.append({"task": task, "reason": str(reason), "params": params})
     return normalized
 
 
@@ -117,10 +221,13 @@ def normalize_exec_response(task: str, out: Any) -> Dict[str, Any]:
     if d.get("exit_code") is None:
         d["exit_code"] = 0 if d.get("ok") else 1
     return d
-def call_agent_exec(agent_exec_url: str, task: str, chat_id: Optional[int], timeout_s: int = 30) -> Dict[str, Any]:
+def call_agent_exec(agent_exec_url: str, task: str, chat_id: Optional[int], timeout_s: int = 30, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"task": task}
     if chat_id is not None:
         payload["chatId"] = chat_id
+
+    if params is not None:
+        payload["params"] = params
 
     with httpx.Client(timeout=timeout_s) as client:
         r = client.post(agent_exec_url, json=payload)
@@ -128,6 +235,202 @@ def call_agent_exec(agent_exec_url: str, task: str, chat_id: Optional[int], time
         return r.json()
 
 
+def _n8n_allowlist() -> set[str]:
+    raw = os.environ.get("N8N_ALLOW_WORKFLOW_IDS", "")
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+def _n8n_base() -> str:
+    base = (os.environ.get("N8N_BASE_URL") or "https://ii-bot-nout.ru/api/v1").rstrip("/")
+    return base
+
+def _n8n_key() -> str:
+    return os.environ.get("N8N_API_KEY", "")
+
+
+def _n8n_allow_write() -> bool:
+    return str(os.environ.get("N8N_ALLOW_WRITE", "0")).strip() in {"1","true","yes","on"}
+
+def call_n8n(task: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Минимальный n8n API клиент внутри brain.
+    READ-only по умолчанию; WRITE будет добавлен позже и включается только при N8N_ALLOW_WRITE=1.
+    Возвращает стандартный формат: ok, action, stdout, stderr, text, exit_code.
+    """
+    base = _n8n_base()
+    key = _n8n_key()
+    if not key:
+        return {"ok": False, "action": task, "stdout": "", "stderr": "N8N_API_KEY not set", "text": "N8N_API_KEY not set", "exit_code": 1}
+
+    allow = _n8n_allowlist()
+
+    def req(method: str, path: str, json_body: Any = None) -> Dict[str, Any]:
+        headers = {"X-N8N-API-KEY": key}
+        with httpx.Client(timeout=30) as client:
+            r = client.request(method, base + path, headers=headers, json=json_body)
+            try:
+                data = r.json()
+                body_txt = json.dumps(data, ensure_ascii=False)
+            except Exception:
+                body_txt = r.text or ""
+            ok = 200 <= r.status_code < 300
+            return {
+                "ok": ok,
+                "action": task,
+                "stdout": body_txt if ok else "",
+                "stderr": "" if ok else f"{r.status_code} {r.reason_phrase}: {body_txt}",
+                "text": body_txt if body_txt else (f"{r.status_code} {r.reason_phrase}"),
+                "exit_code": 0 if ok else 1,
+                "_http_code": r.status_code,
+            }
+
+    if task == "n8n: self_test":
+        # легкая проверка: получить 1 workflow
+        return req("GET", "/workflows?limit=1")
+
+    if task == "n8n: list_workflows":
+        # Возвращаем ТОЛЬКО allowlist (не листаем весь n8n).
+        if not allow:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "N8N_ALLOW_WORKFLOW_IDS is empty", "text": "N8N_ALLOW_WORKFLOW_IDS is empty", "exit_code": 1}
+
+        items = []
+        errors = []
+        for wid in sorted(allow):
+            r = req("GET", f"/workflows/{wid}")
+            if r.get("ok"):
+                try:
+                    items.append(json.loads(r.get("stdout") or "{}"))
+                except Exception:
+                    items.append({"id": wid, "raw": r.get("stdout", "")})
+            else:
+                errors.append({"id": wid, "error": r.get("stderr") or r.get("text")})
+
+        ok = len(errors) == 0
+        out_obj = {"workflows": items, "errors": errors}
+        txt = json.dumps(out_obj, ensure_ascii=False)
+        return {
+            "ok": ok,
+            "action": task,
+            "stdout": txt if ok else "",
+            "stderr": "" if ok else txt,
+            "text": txt,
+            "exit_code": 0 if ok else 1,
+        }
+
+
+    if task == "n8n: executions_list":
+        # Read-only: список последних исполнений по workflow_id
+        wid = (params or {}).get("workflow_id") or (params or {}).get("id")
+        if not wid:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow_id required", "text": "params.workflow_id required", "exit_code": 1}
+        if allow and wid not in allow:
+            return {"ok": False, "action": task, "stdout": "", "stderr": f"workflow_id not in allowlist: {wid}", "text": f"workflow_id not in allowlist: {wid}", "exit_code": 1}
+        limit = int((params or {}).get("limit") or 5)
+        if limit < 1: limit = 1
+        if limit > 20: limit = 20
+        # n8n API: /executions?workflowId=...&limit=...
+        return req("GET", f"/executions?workflowId={wid}&limit={limit}")
+
+    if task == "n8n: workflows_get_dryrun":
+        # Read-only: GET workflow и посчитать sha256 payload (как если бы делали update), без записи.
+        wid = (params or {}).get("workflow_id") or (params or {}).get("id")
+        if not wid:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow_id required", "text": "params.workflow_id required", "exit_code": 1}
+        if allow and wid not in allow:
+            return {"ok": False, "action": task, "stdout": "", "stderr": f"workflow_id not in allowlist: {wid}", "text": f"workflow_id not in allowlist: {wid}", "exit_code": 1}
+        r = req("GET", f"/workflows/{wid}")
+        if not r.get("ok"):
+            return r
+        try:
+            wf = json.loads(r.get("stdout") or "{}")
+        except Exception:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "Failed to parse workflow JSON", "text": "Failed to parse workflow JSON", "exit_code": 1}
+        # используем ту же логику, что dryrun
+        wf2 = dict(wf)
+        # id is read-only in n8n API; never send it in body
+        wf2.pop("id", None)
+        body = json.dumps(wf2, ensure_ascii=False, sort_keys=True)
+        import hashlib
+        sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        out_obj = {"workflow_id": wid, "bytes": len(body.encode("utf-8")), "sha256": sha, "note": "get+dryrun ok (no write)"}
+        txt = json.dumps(out_obj, ensure_ascii=False)
+        return {"ok": True, "action": task, "stdout": txt, "stderr": "", "text": txt, "exit_code": 0}
+
+    if task == "n8n: get_workflow":
+        task = "n8n: workflows_get"
+
+    if task == "n8n: workflows_update_dryrun":
+        # DRY-RUN: проверка payload для PUT без записи в n8n.
+        wid = (params or {}).get("workflow_id") or (params or {}).get("id")
+        if not wid:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow_id required", "text": "params.workflow_id required", "exit_code": 1}
+        if allow and wid not in allow:
+            return {"ok": False, "action": task, "stdout": "", "stderr": f"workflow_id not in allowlist: {wid}", "text": f"workflow_id not in allowlist: {wid}", "exit_code": 1}
+        wf = (params or {}).get("workflow") or (params or {}).get("data")
+        # allow passing workflow via local JSON file path (params.file)
+        if (wf is None or wf == {}) and (params or {}).get("file"):
+            try:
+                from pathlib import Path
+                wf = json.loads(Path(str((params or {}).get("file"))).read_text(encoding="utf-8"))
+            except Exception as ex:
+                return {"ok": False, "action": task, "stdout": "", "stderr": f"failed to load params.file: {ex}", "text": f"failed to load params.file: {ex}", "exit_code": 1}
+        # n8n PUT schema is strict: keep only allowed keys
+        if isinstance(wf, dict):
+            wf = {k: wf.get(k) for k in ("name","nodes","connections","settings") if k in wf}
+            if "settings" not in wf or wf.get("settings") is None:
+                wf["settings"] = {}
+        if not isinstance(wf, dict) or not wf:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow (object) required", "text": "params.workflow (object) required", "exit_code": 1}
+        if "id" in wf and str(wf.get("id")) != str(wid):
+            return {"ok": False, "action": task, "stdout": "", "stderr": "workflow.id mismatch with params.workflow_id", "text": "workflow.id mismatch with params.workflow_id", "exit_code": 1}
+        wf2 = dict(wf)
+        # id is read-only in n8n API; never send it in body
+        wf2.pop("id", None)
+        body = json.dumps(wf2, ensure_ascii=False, sort_keys=True)
+        import hashlib
+        sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        out_obj = {"workflow_id": wid, "bytes": len(body.encode("utf-8")), "sha256": sha, "note": "dry-run ok (no write)"}
+        txt = json.dumps(out_obj, ensure_ascii=False)
+        return {"ok": True, "action": task, "stdout": txt, "stderr": "", "text": txt, "exit_code": 0}
+
+    if task == "n8n: workflows_update":
+        # WRITE-GATE: разрешено только если N8N_ALLOW_WRITE=1 и workflow_id в allowlist.
+        if not _n8n_allow_write():
+            return {"ok": False, "action": task, "stdout": "", "stderr": "WRITE disabled (set N8N_ALLOW_WRITE=1)", "text": "WRITE disabled (set N8N_ALLOW_WRITE=1)", "exit_code": 1}
+        wid = (params or {}).get("workflow_id") or (params or {}).get("id")
+        if not wid:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow_id required", "text": "params.workflow_id required", "exit_code": 1}
+        if allow and wid not in allow:
+            return {"ok": False, "action": task, "stdout": "", "stderr": f"workflow_id not in allowlist: {wid}", "text": f"workflow_id not in allowlist: {wid}", "exit_code": 1}
+        wf = (params or {}).get("workflow") or (params or {}).get("data")
+        # allow passing workflow via local JSON file path (params.file)
+        if (wf is None or wf == {}) and (params or {}).get("file"):
+            try:
+                from pathlib import Path
+                wf = json.loads(Path(str((params or {}).get("file"))).read_text(encoding="utf-8"))
+            except Exception as ex:
+                return {"ok": False, "action": task, "stdout": "", "stderr": f"failed to load params.file: {ex}", "text": f"failed to load params.file: {ex}", "exit_code": 1}
+        # n8n PUT schema is strict: keep only allowed keys
+        if isinstance(wf, dict):
+            wf = {k: wf.get(k) for k in ("name","nodes","connections","settings") if k in wf}
+            if "settings" not in wf or wf.get("settings") is None:
+                wf["settings"] = {}
+        if not isinstance(wf, dict) or not wf:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow (object) required", "text": "params.workflow (object) required", "exit_code": 1}
+        # Безопасность: не позволяем менять другой id внутри тела.
+        if "id" in wf and str(wf.get("id")) != str(wid):
+            return {"ok": False, "action": task, "stdout": "", "stderr": "workflow.id mismatch with params.workflow_id", "text": "workflow.id mismatch with params.workflow_id", "exit_code": 1}
+        wf2 = dict(wf)
+        wf2.pop("id", None)
+        return req("PUT", f"/workflows/{wid}", json_body=wf2)
+    if task == "n8n: workflows_get":
+        wid = (params or {}).get("workflow_id") or (params or {}).get("id")
+        if not wid:
+            return {"ok": False, "action": task, "stdout": "", "stderr": "params.workflow_id required", "text": "params.workflow_id required", "exit_code": 1}
+        if allow and wid not in allow:
+            return {"ok": False, "action": task, "stdout": "", "stderr": f"workflow_id not in allowlist: {wid}", "text": f"workflow_id not in allowlist: {wid}", "exit_code": 1}
+        return req("GET", f"/workflows/{wid}")
+
+    return {"ok": False, "action": task, "stdout": "", "stderr": f"Unsupported n8n task: {task}", "text": f"Unsupported n8n task: {task}", "exit_code": 1}
 def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str, Any]:
     system = (
         "Ты — планировщик действий для DevOps-агента. "
@@ -138,7 +441,10 @@ def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str,
         "- ssh: healthz\n"
         "- ssh: backup_now\n"
         "- ssh: caddy_logs\n"
-        "- ssh: restart_n8n\n\n"
+        "- ssh: compose_ps\n"
+        "- ssh: restart_n8n\n"
+        "- n8n: self_test\n"
+        "- n8n: workflows_get (params: workflow_id)\n- n8n: workflows_get_dryrun (params: workflow_id, no write)\n\n"
         "Формат ответа JSON:\n"
         "{\n"
         '  "summary": "коротко что делаем",\n'
@@ -146,8 +452,15 @@ def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str,
         '  "finish": {"status":"done|need_more_info","message":"короткий итог","questions":[...]}\n'
         "}\n\n"
         "Правила:\n"
+        "- Любые n8n действия выполняй ТОЛЬКО по workflow_id из N8N_ALLOW_WORKFLOW_IDS.\n"
+        "- Пока N8N_ALLOW_WRITE=0: НЕ предлагай изменений в n8n, только чтение/self_test.\n"
+        "- Для списка workflow используй ТОЛЬКО task 'n8n: list_workflows' (он читает allowlist сам).\n- Если просят sha256/dry-run/hash для workflow: используй ТОЛЬКО task 'n8n: workflows_get_dryrun' (одна action, без передачи данных между actions).\n"
+        "- Task 'n8n: workflows_get' / 'n8n: get_workflow' ВСЕГДА требует params.workflow_id и не подходит для 'списка'.\n"
         "- Если в запросе есть фраза \"только если есть проблема / only if problem\": НЕ ставь need_more_info. Всегда выполни базовые проверки (docker_status и healthz), а caddy_logs добавляй ТОЛЬКО если базовые проверки показали проблему.\n"
         "- Делай МИНИМУМ действий, которые реально нужны.\n"
+        "- НИКОГДА не возвращай пустой actions: минимум 1 действие всегда.\n"
+        "- Если пользователь просит WRITE, но N8N_ALLOW_WRITE=0: добавь read-only действие n8n: get_workflow (с params.workflow_id), а в finish.message объясни, что WRITE заблокирован.\n"
+        "- Для docker compose ps используй ТОЛЬКО task \"ssh: compose_ps\" (без params), он по умолчанию проверяет проект \"/opt/n8n\".\n"
         "- Не придумывай новые task.\n"
         "- Если не хватает данных — ставь finish.status=need_more_info и задай вопросы.\n"
     )
@@ -223,8 +536,140 @@ def sanitize_response(task: str, out: dict) -> dict:
     out2["_saved_to"] = str(fp)
     return out2
 
+
+def validate_handv2_args(action: str, args: Any, manifests: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """
+    Lightweight args validation based on Hand v2 manifests args_schema (subset of JSON Schema).
+    Returns error string or None if ok.
+    """
+    if args in (None, ""):
+        args = {}
+    if not isinstance(args, dict):
+        return "params.args must be an object (dict)"
+
+    mf = None
+    if isinstance(manifests, list):
+        for m in manifests:
+            if isinstance(m, dict) and str(m.get("name", "")).strip() == str(action).strip():
+                mf = m
+                break
+    if not mf:
+        # unknown schema => don't block execution
+        return None
+
+    schema = mf.get("args_schema") or {}
+    props = schema.get("properties") or {}
+    required = schema.get("required") or []
+    additional = schema.get("additionalProperties", True)
+
+    for r in required:
+        if r not in args:
+            return f"missing required arg: {r}"
+
+    if additional is False:
+        extra = [k for k in args.keys() if k not in props]
+        if extra:
+            return "unknown args: " + ", ".join(extra)
+
+    for k, v in args.items():
+        spec = props.get(k)
+        if not isinstance(spec, dict):
+            continue
+        t = spec.get("type")
+
+        if t == "integer":
+            if not isinstance(v, int):
+                return f"arg '{k}' must be integer"
+            mn = spec.get("minimum")
+            mx = spec.get("maximum")
+            if isinstance(mn, int) and v < mn:
+                return f"arg '{k}' must be >= {mn}"
+            if isinstance(mx, int) and v > mx:
+                return f"arg '{k}' must be <= {mx}"
+
+        elif t == "string":
+            if not isinstance(v, str):
+                return f"arg '{k}' must be string"
+
+        elif t == "boolean":
+            if not isinstance(v, bool):
+                return f"arg '{k}' must be boolean"
+
+    return None
+
+
 def main() -> int:
     load_env()
+
+    task_text = ' '.join(sys.argv[1:]).strip()
+
+    # Common runtime params (needed for self-discovery and direct ssh: run)
+    agent_exec_url = os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
+    chat_id_env = os.environ.get("TG_CHAT_ID")
+    chat_id = int(chat_id_env) if (chat_id_env and str(chat_id_env).isdigit()) else None
+
+    # DIRECT_SSH_RUN: bypass LLM planning for strict CLI command "ssh: run action=... mode=..."
+    _direct = _parse_direct_ssh_run(task_text)
+    if _direct:
+        # HANDV2_ARGS_VALIDATE
+        _p = _direct.get('params') or {}
+        _action = str(_p.get('action','')).strip()
+        _args = _p.get('args') or {}
+        handv2_manifests = refresh_handv2_manifests(agent_exec_url, chat_id) or load_handv2_manifests_cache()
+        _err = validate_handv2_args(_action, _args, handv2_manifests)
+        if _err:
+            report = {
+                'ok': False,
+                'exit_code': 1,
+                'summary': f"ssh: run → {_action} rejected: {_err}",
+                'results': [{
+                    'task': 'ssh: run',
+                    'params': _p,
+                    'response': {
+                        'ok': False,
+                        'action': _action,
+                        'mode': _p.get('mode','check'),
+                        'stdout': '',
+                        'stderr': _err,
+                        'text': _err,
+                        'exit_code': 1,
+                    }
+                }]
+            }
+            print(f"[plan] summary: {report['summary']}")
+            print("\n[exec] running actions: 1")
+            print("\n[exec #1] ssh: run (direct)")
+            print("\n[report] done.")
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+        resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=_direct.get("params"))
+        resp = normalize_exec_response("ssh: run", resp)
+        report = {
+            "ok": bool(resp.get("ok")),
+            "exit_code": int(resp.get("exit_code", 0) or 0),
+            "summary": f"ssh: run → {(_direct.get('params') or {}).get('action')} ({(_direct.get('params') or {}).get('mode','check')})",
+            "results": [{"task": "ssh: run", "params": _direct.get("params"), "response": resp}],
+        }
+        print(f"[plan] summary: {report['summary']}")
+        print("\n[exec] running actions: 1")
+        print("\n[exec #1] ssh: run (direct)")
+        print("\n[report] done.")
+        print(json.dumps(report, ensure_ascii=False))
+        raise SystemExit(0 if report["ok"] else 1)
+
+    # Hand v2 self-discovery (refresh manifests; fallback to cache)
+    handv2_manifests = refresh_handv2_manifests(agent_exec_url, chat_id) or load_handv2_manifests_cache()
+    if handv2_manifests:
+        try:
+            names = [str(x.get("name","?")) for x in handv2_manifests if isinstance(x, dict)]
+            print("[brain] handv2_actions=" + ",".join(sorted(set(names))))
+        except Exception:
+            print("[brain] handv2_actions=OK (cache/refresh)")
+    else:
+        print("[brain] handv2_actions=UNKNOWN (no manifests)")
+
+
 
     user_task = " ".join(sys.argv[1:]).strip()
     if not user_task:
@@ -284,37 +729,65 @@ def main() -> int:
     issue_found = False
 
     for i, a in enumerate(base_actions, start=1):
-        task = a["task"]
-        reason = a.get("reason", "")
+        task = a.get('task')
+        params = a.get('params') or {}
+        reason = a.get('reason', '')
+
+        # ssh: run shim (until Hand v2 is deployed on server)
+        if task == 'ssh: run':
+            action = (params or {}).get('action')
+            if not action:
+                issue_found = True
+                results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'params.action required for ssh: run', 'text': 'params.action required for ssh: run', 'exit_code': 1}})
+                eprint(f"[exec #{i}] ERROR: params.action required for ssh: run")
+                continue
+
+            args = (params or {}).get('args')
+            if args not in (None, {}, ''):
+                issue_found = True
+                results.append({'task': 'ssh: run', 'response': {'ok': False, 'action': 'ssh: run', 'stdout': '', 'stderr': 'params.args not supported yet for ssh: run', 'text': 'params.args not supported yet for ssh: run', 'exit_code': 1}})
+                eprint(f"[exec #{i}] ERROR: params.args not supported yet for ssh: run")
+                continue
+
+            action = str(action).strip()
+            resolved_task = action if action.startswith('ssh:') else f"ssh: {action}"
+            if resolved_task not in ALLOWED_TASKS:
+                issue_found = True
+                results.append({'task': 'ssh: run', 'resolved_task': resolved_task, 'response': {'ok': False, 'action': resolved_task, 'stdout': '', 'stderr': f"unsupported ssh: run action: {action}", 'text': f"unsupported ssh: run action: {action}", 'exit_code': 1}})
+                eprint(f"[exec #{i}] ERROR: unsupported ssh: run action: {action}")
+                continue
+
+            task = resolved_task
+            params = {}  # старые ssh:* задачи не используют params
+            print(f"[exec #{i}] ssh: run → {task}")
+
         print(f"\n[exec #{i}] {task}")
         if reason:
             print(f"[exec #{i}] reason: {reason}")
 
         if task in DANGEROUS_TASKS and not allow_dangerous:
             print(f"[exec #{i}] SKIP (dangerous). Set ALLOW_DANGEROUS=1 to allow.")
-            results.append({"task": task, "skipped": True, "why": "dangerous"})
+            results.append({'task': task, 'skipped': True, 'why': 'dangerous'})
             issue_found = True
             continue
 
         try:
-            out_raw = call_agent_exec(agent_exec_url, task, chat_id)
+            out_raw = call_n8n(task, params) if task.startswith('n8n:') else call_agent_exec(agent_exec_url, task, chat_id)
             out_norm = normalize_exec_response(task, out_raw)
             out = sanitize_response(task, out_norm)
-            results.append({"task": task, "response": out})
+            results.append({'task': task, 'response': out})
             print(f"[exec #{i}] ok={out.get('ok')} action={out.get('action')}")
-            stdout = (out.get("stdout") or "")
-            stderr = (out.get("stderr") or "")
+            stdout = (out.get('stdout') or '')
+            stderr = (out.get('stderr') or '')
             if stdout:
                 print(f"[exec #{i}] stdout:", stdout[:600])
             if stderr:
                 print(f"[exec #{i}] stderr:", stderr[:600])
-
-            if not out.get("ok", False):
+            if not out.get('ok', False):
                 issue_found = True
-
         except Exception as ex:
             issue_found = True
-            results.append({"task": task, "error": str(ex)})
+            results.append({'task': task, 'error': str(ex)})
             eprint(f"[exec #{i}] ERROR:", ex)
 
     # если это был режим "только если проблема" и проблема есть — тогда берём caddy_logs
