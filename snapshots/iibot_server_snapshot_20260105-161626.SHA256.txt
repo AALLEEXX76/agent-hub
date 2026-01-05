@@ -1,0 +1,4 @@
+iibot_server_snapshot_20260105-161626.tgz
+sha256 88118aaf796c6624db41174838a744d63fa65e7698a74cf2bc7ef3239f55de5f
+local  /home/user/agent-hub/artifacts/iibot_server_snapshot_20260105-161626.tgz
+server /root/iibot_server_snapshot_20260105-161626.tgz
