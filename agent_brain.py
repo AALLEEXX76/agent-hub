@@ -26,6 +26,21 @@ def load_handv2_manifests_cache() -> Optional[List[Dict[str, Any]]]:
     except Exception:
         return None
 
+
+def index_handv2_manifests(manifests: Optional[List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    """Build quick lookup index: action_name -> manifest dict."""
+    idx: Dict[str, Dict[str, Any]] = {}
+    if not manifests:
+        return idx
+    for m in manifests:
+        if not isinstance(m, dict):
+            continue
+        name = m.get("name")
+        if isinstance(name, str) and name.strip():
+            idx[name.strip()] = m
+    return idx
+
+
 def _extract_manifests_from_list_actions(resp: Any) -> Optional[List[Dict[str, Any]]]:
     try:
         arts = (resp or {}).get("artifacts") or []
@@ -617,6 +632,9 @@ def main() -> int:
         _action = str(_p.get('action','')).strip()
         _args = _p.get('args') or {}
         handv2_manifests = refresh_handv2_manifests(agent_exec_url, chat_id) or load_handv2_manifests_cache()
+        handv2_index = index_handv2_manifests(handv2_manifests)
+        handv2_actions = sorted(handv2_index.keys())
+
         _err = validate_handv2_args(_action, _args, handv2_manifests)
         if _err:
             report = {
@@ -660,13 +678,13 @@ def main() -> int:
         raise SystemExit(0 if report["ok"] else 1)
 
     # Hand v2 self-discovery (refresh manifests; fallback to cache)
-    handv2_manifests = refresh_handv2_manifests(agent_exec_url, chat_id) or load_handv2_manifests_cache()
-    if handv2_manifests:
-        try:
-            names = [str(x.get("name","?")) for x in handv2_manifests if isinstance(x, dict)]
-            print("[brain] handv2_actions=" + ",".join(sorted(set(names))))
-        except Exception:
-            print("[brain] handv2_actions=OK (cache/refresh)")
+    # Hand v2 self-discovery (refresh manifests; fallback to cache)
+    handv2_manifests = refresh_handv2_manifests(agent_exec_url, chat_id) or load_handv2_manifests_cache() or []
+    handv2_index = index_handv2_manifests(handv2_manifests)
+    handv2_actions = sorted(handv2_index.keys())
+
+    if handv2_actions:
+        print("[brain] handv2_actions=" + ",".join(handv2_actions))
     else:
         print("[brain] handv2_actions=UNKNOWN (no manifests)")
 
@@ -774,7 +792,7 @@ def main() -> int:
             use_hv2 = bool(args)
 
             try:
-                hv2 = set(handv2_actions)
+                hv2 = set(handv2_index.keys())
             except Exception:
                 hv2 = set()
 
