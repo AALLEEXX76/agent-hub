@@ -804,15 +804,38 @@ def main() -> int:
                 if reason:
                     print(f"[exec #{i}] reason: {reason}")
 
+                # apply Hand v2 args defaults from manifest args_schema.properties.*.default
+
+                try:
+
+                    _m = (handv2_index or {}).get(hv2_action) or {}
+
+                    _schema = (_m.get('args_schema') or {}) if isinstance(_m, dict) else {}
+
+                    _props = (_schema.get('properties') or {}) if isinstance(_schema, dict) else {}
+
+                    if isinstance(_props, dict):
+
+                        for _k, _spec in _props.items():
+
+                            if _k not in args and isinstance(_spec, dict) and 'default' in _spec:
+
+                                args[_k] = _spec.get('default')
+
+                except Exception:
+
+                    pass
+
+
                 out_raw = call_agent_exec(
                     agent_exec_url,
                     "ssh: run",
                     chat_id,
-                    params={"action": action, "mode": mode, "args": args},
+                    params={"action": hv2_action, "mode": mode, "args": args},
                 )
                 out_norm = normalize_exec_response("ssh: run", out_raw)
                 out = sanitize_response("ssh: run", out_norm)
-                results.append({"task": "ssh: run", "params": {"action": action, "mode": mode, "args": args}, "response": out})
+                results.append({"task": "ssh: run", "params": {"action": hv2_action, "mode": mode, "args": args}, "response": out})
 
                 print(f"[exec #{i}] ok={out.get('ok')} action={out.get('action')}")
                 stdout = (out.get('stdout') or '')
