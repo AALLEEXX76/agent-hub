@@ -114,7 +114,13 @@ def _parse_direct_ssh_run(task_text: str) -> Optional[Dict[str, Any]]:
         except Exception:
             args = {}
 
-    return {"task": "ssh: run", "params": {"action": action, "mode": mode, "args": args}}
+    confirm = (kv.get("confirm") or "").strip()
+
+    params = {"action": action, "mode": mode, "args": args}
+    if confirm:
+        params["confirm"] = confirm
+
+    return {"task": "ssh: run", "params": params}
 
 ALLOWED_TASKS = {
     "ssh: docker_status",
