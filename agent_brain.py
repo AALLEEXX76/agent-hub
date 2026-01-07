@@ -635,6 +635,21 @@ def main() -> int:
         handv2_index = index_handv2_manifests(handv2_manifests)
         handv2_actions = sorted(handv2_index.keys())
 
+        # apply Hand v2 args defaults from manifest BEFORE validation (direct mode)
+        try:
+            if not isinstance(_args, dict):
+                _args = {}
+                _p['args'] = _args
+            _m = (handv2_index or {}).get(_action) or {}
+            _schema = (_m.get('args_schema') or {}) if isinstance(_m, dict) else {}
+            _props = (_schema.get('properties') or {}) if isinstance(_schema, dict) else {}
+            if isinstance(_props, dict):
+                for _k, _spec in _props.items():
+                    if _k not in _args and isinstance(_spec, dict) and 'default' in _spec:
+                        _args[_k] = _spec.get('default')
+        except Exception:
+            pass
+
         _err = validate_handv2_args(_action, _args, handv2_manifests)
         if _err:
             report = {
