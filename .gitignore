@@ -10,3 +10,6 @@ artifacts/
 *.bak.*
 *_bak*
 *.bak_*
+
+# local server snapshots (do not commit)
+snapshots/
