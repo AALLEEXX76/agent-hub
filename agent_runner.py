@@ -77,32 +77,28 @@ def run_brain(task_text: str) -> Dict[str, Any]:
 
 def extract_brain_report(brain_stdout: str) -> Optional[Dict[str, Any]]:
     """
-    Достаём финальный JSON, который agent_brain.py печатает после:
-      [report] done.
-      { ...json... }
+    Robustly extract the JSON report printed by agent_brain.py.
+
+    Brain stdout may contain extra log lines after the JSON (e.g. post-apply healthcheck),
+    so we scan lines from bottom to top and parse the first JSON-looking line.
     """
-    marker = "\n[report] done.\n"
-    i = brain_stdout.rfind(marker)
-    if i == -1:
+    import json
+
+    if not brain_stdout:
         return None
 
-    tail = brain_stdout[i + len(marker):].strip()
-    if not tail:
-        return None
-
-    try:
-        dec = JSONDecoder()
-        obj, idx = dec.raw_decode(tail)
-        # Если после JSON есть мусор — считаем это ошибкой формата
-        rest = tail[idx:].strip()
-        if rest:
-            return None
-        if isinstance(obj, dict):
-            return obj
-        return None
-    except Exception:
-        return None
-
+    for ln in reversed(brain_stdout.splitlines()):
+        t = (ln or "").strip()
+        if not t:
+            continue
+        if t.startswith("{") and t.endswith("}"):
+            try:
+                obj = json.loads(t)
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                continue
+    return None
 
 def short_summary(brain_stdout: str, brain_stderr: str = "", ok: bool = True, exit_code: int = 0) -> str:
     """
