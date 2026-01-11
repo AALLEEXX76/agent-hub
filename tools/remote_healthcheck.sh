@@ -8,7 +8,7 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 echo "--- / (first 2 lines) ---"
-curl -fsS 'https://ii-bot-nout.ru/' -o "$tmp"
+curl -fsS 'https://ii-bot-nout.ru/' -o "$tmp" 2>/dev/null
 head -n 2 "$tmp"
 
 echo "--- webhook:list_actions ---"
