@@ -299,6 +299,8 @@ def call_agent_exec(agent_exec_url: str, task: str, chat_id: Optional[int], time
         if task == "ssh: run" and isinstance(params, dict):
             action = str(params.get("action", "")).strip()
             if action and action in _ssh_fallback_actions():
+                print(f"[recovery] webhook unavailable, using ssh fallback for action={action}", file=sys.stderr)
+
                 return _call_handv2_via_ssh(params)
         msg = f"agent-exec call failed: {ex}"
         return {"ok": False, "action": task, "stdout": "", "stderr": msg, "text": msg, "exit_code": 1}
