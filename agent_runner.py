@@ -77,28 +77,42 @@ def run_brain(task_text: str) -> Dict[str, Any]:
 
 def extract_brain_report(brain_stdout: str) -> Optional[Dict[str, Any]]:
     """
-    Robustly extract the JSON report printed by agent_brain.py.
+    Robustly extract the final JSON report printed by agent_brain.py.
 
-    Brain stdout may contain extra log lines after the JSON (e.g. post-apply healthcheck),
-    so we scan lines from bottom to top and parse the first JSON-looking line.
+    Brain stdout may contain:
+      - lots of logs before JSON
+      - pretty (multiline) JSON at the end
+      - extra logs after JSON (e.g. post-apply healthcheck)
+
+    Strategy:
+      - find JSON object that starts at beginning of a line ("^{")
+      - try to json-decode from the last such position backwards
+      - accept the first successfully decoded dict
     """
     import json
+    import re
 
     if not brain_stdout:
         return None
 
-    for ln in reversed(brain_stdout.splitlines()):
-        t = (ln or "").strip()
-        if not t:
+    # candidates: positions where a JSON object starts at line beginning
+    positions = [m.start() for m in re.finditer(r"(?m)^\{", brain_stdout)]
+    if not positions:
+        return None
+
+    dec = json.JSONDecoder()
+    for pos in reversed(positions):
+        tail = brain_stdout[pos:].lstrip()
+        try:
+            obj, _end = dec.raw_decode(tail)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
             continue
-        if t.startswith("{") and t.endswith("}"):
-            try:
-                obj = json.loads(t)
-                if isinstance(obj, dict):
-                    return obj
-            except Exception:
-                continue
+
     return None
+
+
 
 def short_summary(brain_stdout: str, brain_stderr: str = "", ok: bool = True, exit_code: int = 0) -> str:
     """
