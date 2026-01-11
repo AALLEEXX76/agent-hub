@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RID="${1:-rq_hc_$(date +%s)_$RANDOM}"
+RID="rq_hc_$(date +%s)_$RANDOM"
 echo "RID=$RID"
 
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
 echo "--- / (first 2 lines) ---"
-curl -fsS https://ii-bot-nout.ru/ | head -n 2 || true
+curl -fsS 'https://ii-bot-nout.ru/' -o "$tmp"
+head -n 2 "$tmp"
 
 echo "--- webhook:list_actions ---"
 curl -fsS -X POST 'https://ii-bot-nout.ru/webhook/agent-exec' \

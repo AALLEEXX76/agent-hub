@@ -9,6 +9,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 import httpx
+import subprocess
 from dotenv import load_dotenv
 from anthropic import Anthropic
 
@@ -696,7 +697,21 @@ def main() -> int:
         print("\n[exec #1] ssh: run (direct)")
         print("\n[report] done.")
         print(json.dumps(report, ensure_ascii=False))
+        # post-apply health-check (direct mode; runs only after successful apply)
+        try:
+            _mode = str((_direct.get("params") or {}).get("mode","check")).strip().lower()
+            if _mode == "apply" and report.get("ok", False):
+                hc = str(Path(__file__).with_name("tools") / "remote_healthcheck.sh")
+                if Path(hc).exists():
+                    print(f"[exec #1] post-apply healthcheck: {hc}")
+                    import subprocess
+                    subprocess.run([hc], check=False)
+                else:
+                    print(f"[exec #1] post-apply healthcheck skipped (missing): {hc}")
+        except Exception as _ex:
+            print(f"[exec #1] post-apply healthcheck failed: {_ex}")
         raise SystemExit(0 if report["ok"] else 1)
+
 
     # Hand v2 self-discovery (refresh manifests; fallback to cache)
     # Hand v2 self-discovery (refresh manifests; fallback to cache)
@@ -866,7 +881,18 @@ def main() -> int:
                 if stderr:
                     print(f"[exec #{i}] stderr:", stderr[:600])
                 if not out.get('ok', False):
-                    issue_found = True
+                    issue_found = True                # post-apply health-check (runs only after successful apply)
+                if mode == 'apply' and out.get('ok', False):
+                    try:
+                        hc = str(Path(__file__).with_name('tools') / 'remote_healthcheck.sh')
+                        if Path(hc).exists():
+                            print(f"[exec #{i}] post-apply healthcheck: {hc}")
+                            subprocess.run([hc], check=False)
+                        else:
+                            print(f"[exec #{i}] post-apply healthcheck skipped (missing): {hc}")
+                    except Exception as _ex:
+                        print(f"[exec #{i}] post-apply healthcheck failed: {_ex}")
+
                 continue
 
             # Legacy fallback (no args support)
