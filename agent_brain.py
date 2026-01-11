@@ -243,19 +243,65 @@ def normalize_exec_response(task: str, out: Any) -> Dict[str, Any]:
     if d.get("exit_code") is None:
         d["exit_code"] = 0 if d.get("ok") else 1
     return d
+# --- SSH FALLBACK HELPERS (Recovery/self-ops) ---
+def _ssh_fallback_actions() -> set[str]:
+    raw = os.environ.get("RECOVERY_SSH_ACTIONS", "compose_up,compose_restart,compose_ps,compose_logs")
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+def _call_handv2_via_ssh(params: Dict[str, Any], timeout_s: int = 180) -> Dict[str, Any]:
+    """Out-of-band recovery path: Brain -> SSH -> iibotv2. Works even if webhook is down."""
+    import subprocess, time, random
+    ssh_host = os.environ.get("HANDV2_SSH_HOST", "ii-bot-nout")
+    base_cmd = os.environ.get("HANDV2_SSH_CMD", "/usr/local/sbin/iibotv2")
+    remote_cmd = f"ALLOW_DANGEROUS=1 {base_cmd}" if str(os.environ.get("ALLOW_DANGEROUS","0")).strip() == "1" else base_cmd
+    rid = f"rq_sshfb_{int(time.time())}_{random.randint(1000,9999)}"
+    payload = {"task": "ssh: run", "request_id": rid, "params": params}
+    try:
+        proc = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", ssh_host, remote_cmd],
+            input=(json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_s,
+        )
+    except Exception as ex:
+        msg = f"SSH fallback failed: {ex}"
+        return {"ok": False, "action": "ssh: run", "stdout": "", "stderr": msg, "text": msg, "exit_code": 1, "request_id": rid, "_fallback": "ssh"}
+    stdout = (proc.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode != 0 and not stdout.strip():
+        msg = (stderr.strip() or f"ssh exit_code={proc.returncode}")
+        return {"ok": False, "action": "ssh: run", "stdout": "", "stderr": msg, "text": msg, "exit_code": 1, "request_id": rid, "_fallback": "ssh"}
+    try:
+        out = json.loads(stdout) if stdout.strip() else {}
+        if isinstance(out, dict):
+            out.setdefault("request_id", rid)
+            out["_fallback"] = "ssh"
+            return out
+    except Exception:
+        pass
+    msg = (stderr.strip() or "SSH fallback returned non-JSON")
+    return {"ok": False, "action": "ssh: run", "stdout": stdout, "stderr": msg, "text": msg, "exit_code": 1, "request_id": rid, "_fallback": "ssh"}
+
 def call_agent_exec(agent_exec_url: str, task: str, chat_id: Optional[int], timeout_s: int = 30, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"task": task}
     if chat_id is not None:
         payload["chatId"] = chat_id
-
     if params is not None:
         payload["params"] = params
-
-    with httpx.Client(timeout=timeout_s) as client:
-        r = client.post(agent_exec_url, json=payload)
-        r.raise_for_status()
-        return r.json()
-
+    try:
+        with httpx.Client(timeout=timeout_s) as client:
+            r = client.post(agent_exec_url, json=payload)
+            r.raise_for_status()
+            return r.json()
+    except Exception as ex:
+        # Recovery SSH fallback (only for ssh: run + allowlisted actions)
+        if task == "ssh: run" and isinstance(params, dict):
+            action = str(params.get("action", "")).strip()
+            if action and action in _ssh_fallback_actions():
+                return _call_handv2_via_ssh(params)
+        msg = f"agent-exec call failed: {ex}"
+        return {"ok": False, "action": task, "stdout": "", "stderr": msg, "text": msg, "exit_code": 1}
 
 def _n8n_allowlist() -> set[str]:
     raw = os.environ.get("N8N_ALLOW_WORKFLOW_IDS", "")
