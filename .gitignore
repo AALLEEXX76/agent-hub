@@ -13,3 +13,5 @@ artifacts/
 
 # local server snapshots (do not commit)
 snapshots/
+
+workflows/

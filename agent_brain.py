@@ -779,6 +779,91 @@ def main() -> int:
         eprint('Usage: ./agent_brain.py "твоя задача текстом"')
         return 2
 
+    # --- Monitoring shortcuts (rule-based, no LLM) ---
+
+    try:
+
+        _t = user_task.strip()
+
+        _tl = _t.lower()
+
+
+        # 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck
+
+        if _tl.startswith("monitoring:") and ("zabbix quickcheck" in _tl or "zabbix_quickcheck" in _tl):
+
+            _aeu = os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
+
+            _chat_id_env = os.environ.get("TG_CHAT_ID")
+
+            _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
+
+            _params = {"action": "zabbix_quickcheck", "mode": "check", "args": {}}
+
+            resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
+
+            resp = normalize_exec_response("ssh: run", resp)
+
+            import json as _json
+
+            print(_json.dumps(resp, ensure_ascii=False))
+
+            raise SystemExit(0 if resp.get("ok") else 1)
+
+
+        # 2) monitoring: zabbix agent info -> Hand v2 zabbix_agent_info
+
+        if _tl.startswith("monitoring:") and ("zabbix agent info" in _tl or "zabbix-agent info" in _tl):
+
+            _aeu = os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
+
+            _chat_id_env = os.environ.get("TG_CHAT_ID")
+
+            _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
+
+            _params = {"action": "zabbix_agent_info", "mode": "check", "args": {}}
+
+            resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
+
+            resp = normalize_exec_response("ssh: run", resp)
+
+
+            out = str(resp.get("stdout") or resp.get("text") or "").strip()
+
+            obj = None
+
+            try:
+
+                import json as _json
+
+                obj = _json.loads(out) if out else None
+
+            except Exception:
+
+                obj = None
+
+            if obj is None:
+
+                obj = resp
+
+
+            import json as _json
+
+            print(_json.dumps(obj, ensure_ascii=False))
+
+            raise SystemExit(0 if resp.get("ok") else 1)
+
+
+    except SystemExit:
+
+        raise
+
+    except Exception as _ex:
+
+        print(f"[monitoring] shortcut failed: {_ex}")
+
+    # --- /Monitoring shortcuts ---
+
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_key:
         eprint("ERROR: ANTHROPIC_API_KEY not found. Add it to ~/agent-hub/.agent_env")
