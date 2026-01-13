@@ -819,9 +819,10 @@ def main() -> int:
 
             import json as _json
 
+            status = 'OK' if resp.get('ok') else 'FAIL'
+            print(f"[plan] summary: zabbix quickcheck {status}")
             print(_json.dumps(resp, ensure_ascii=False))
-
-            raise SystemExit(0 if resp.get("ok") else 1)
+            raise SystemExit(0 if resp.get('ok') else 1)
 
 
         # 1b) monitoring: zabbix status -> alias to zabbix_quickcheck (short OK/FAIL + reason)
