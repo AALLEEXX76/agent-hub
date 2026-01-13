@@ -787,6 +787,7 @@ def main() -> int:
 
         _tl = _t.lower()
 
+    
 
         def _parse_json_maybe(x):
 
@@ -800,6 +801,115 @@ def main() -> int:
 
                 return None
 
+    
+
+        def _call_ssh_action(_action, _args=None):
+
+            _aeu = os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
+
+            _chat_id_env = os.environ.get("TG_CHAT_ID")
+
+            _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
+
+            _params = {"action": _action, "mode": "check", "args": (_args or {})}
+
+            _resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
+
+            return normalize_exec_response("ssh: run", _resp)
+
+    
+
+        # monitoring: server status -> docker_status + healthz + caddy_logs (tail 30)
+
+        if _tl.startswith("monitoring:") and ("server status" in _tl or "server_status" in _tl):
+
+            r_docker = _call_ssh_action("docker_status", {})
+
+            r_health = _call_ssh_action("healthz", {})
+
+            r_caddy  = _call_ssh_action("caddy_logs", {"tail": 30})
+
+    
+
+            health_obj = _parse_json_maybe(str(r_health.get("stdout") or r_health.get("text") or "").strip()) or {}
+
+            health_ok = bool(r_health.get("ok")) and (health_obj.get("status") == "ok")
+
+            docker_ok = bool(r_docker.get("ok"))
+
+    
+
+            caddy_text = str(r_caddy.get("stdout") or r_caddy.get("text") or "")
+
+            caddy_errs = caddy_text.count('\"level\":\"error\"') + caddy_text.count('"level":"error"')
+
+    
+
+            ok = bool(docker_ok and health_ok)
+
+            status = "OK" if ok else "FAIL"
+
+    
+
+            extra = f" (caddy_errors_tail={caddy_errs})" if caddy_errs else ""
+
+            print(f"[plan] summary: server status {status}"+extra)
+
+    
+
+            import json as _json
+
+            out = {
+
+                "ok": ok,
+
+                "status": status,
+
+                "reason": None if ok else ("healthz not ok" if not health_ok else "docker_status failed"),
+
+                "checks": {
+
+                    "docker_status": {
+
+                        "ok": bool(r_docker.get("ok")),
+
+                        "request_id": r_docker.get("request_id"),
+
+                        "text": r_docker.get("text") or r_docker.get("stdout") or "",
+
+                    },
+
+                    "healthz": {
+
+                        "ok": bool(health_ok),
+
+                        "request_id": r_health.get("request_id"),
+
+                        "raw": r_health.get("text") or r_health.get("stdout") or "",
+
+                    },
+
+                    "caddy_logs_tail": {
+
+                        "ok": bool(r_caddy.get("ok")),
+
+                        "request_id": r_caddy.get("request_id"),
+
+                        "error_count": int(caddy_errs),
+
+                        "text": caddy_text,
+
+                    },
+
+                },
+
+            }
+
+            print(_json.dumps(out, ensure_ascii=False))
+
+            raise SystemExit(0 if ok else 1)
+
+    
 
         # 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck (verbose JSON)
 
@@ -820,115 +930,86 @@ def main() -> int:
             import json as _json
 
             status = 'OK' if resp.get('ok') else 'FAIL'
-            print(f"[plan] summary: zabbix quickcheck {status}")
-            print(_json.dumps(resp, ensure_ascii=False))
-            raise SystemExit(0 if resp.get('ok') else 1)
 
+            print(f"[plan] summary: zabbix quickcheck {status}")
+
+            print(_json.dumps(resp, ensure_ascii=False))
+
+            raise SystemExit(0 if resp.get("ok") else 1)
+
+    
 
         # 1b) monitoring: zabbix status -> alias to zabbix_quickcheck (short OK/FAIL + reason)
 
-
         if _tl.startswith("monitoring:") and ("zabbix status" in _tl or "zabbix_status" in _tl):
-
 
             _aeu = os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
 
-
             _chat_id_env = os.environ.get("TG_CHAT_ID")
-
 
             _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
 
-
             _params = {"action": "zabbix_quickcheck", "mode": "check", "args": {}}
-
 
             resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
 
-
             resp = normalize_exec_response("ssh: run", resp)
 
-
+    
 
             out = str(resp.get("stdout") or resp.get("text") or "").strip()
 
-
             obj = _parse_json_maybe(out) if out else None
-
 
             reason = None
 
-
             if isinstance(obj, dict):
-
 
                 reason = obj.get("reason") or obj.get("summary")
 
-
             if not reason:
-
 
                 arts = resp.get("artifacts") or []
 
-
                 if isinstance(arts, list):
-
 
                     for a in arts:
 
-
                         if isinstance(a, dict) and a.get("name") == "zabbix_quickcheck":
-
 
                             v = a.get("value")
 
-
                             if isinstance(v, dict):
-
 
                                 reason = v.get("reason") or v.get("summary")
 
-
                             break
 
-
+    
 
             ok = bool(resp.get("ok"))
 
-
-            status = "OK" if ok else "FAIL"
-
-
-            msg = (str(reason).strip() if reason else "unknown")
-
-
-
-            # summary for agent_runner.py
-
-
-            print(f"[plan] summary: zabbix status {status}")
-
-
-
-            # short human output
-
-
-            print("OK" if ok else f"FAIL: {msg}")
-
-
-
-            # final JSON for runner parser (must start at line-beginning with '{')
-
-
             import json as _json
 
+            if ok:
 
-            print(_json.dumps({"ok": ok, "status": status, "reason": (None if ok else msg), "source_action": "zabbix_quickcheck"}, ensure_ascii=False))
+                print("[plan] summary: zabbix status OK")
 
+                print(_json.dumps({"ok": True, "status": "OK", "reason": None, "source_action": "zabbix_quickcheck"}, ensure_ascii=False))
 
-            raise SystemExit(0 if ok else 1)
+                raise SystemExit(0)
 
+            else:
 
+                msg = (str(reason).strip() if reason else "unknown")
+
+                print("[plan] summary: zabbix status FAIL")
+
+                print(_json.dumps({"ok": False, "status": "FAIL", "reason": msg, "source_action": "zabbix_quickcheck"}, ensure_ascii=False))
+
+                raise SystemExit(1)
+
+    
 
         # 2) monitoring: zabbix agent info -> Hand v2 zabbix_agent_info (pretty JSON)
 
@@ -946,6 +1027,7 @@ def main() -> int:
 
             resp = normalize_exec_response("ssh: run", resp)
 
+    
 
             out = str(resp.get("stdout") or resp.get("text") or "").strip()
 
@@ -955,14 +1037,19 @@ def main() -> int:
 
                 obj = resp
 
+    
 
             import json as _json
 
             status = 'OK' if resp.get('ok') else 'FAIL'
-            print(f"[plan] summary: zabbix agent info {status}")
-            print(_json.dumps(obj, ensure_ascii=False))
-            raise SystemExit(0 if resp.get('ok') else 1)
 
+            print(f"[plan] summary: zabbix agent info {status}")
+
+            print(_json.dumps(obj, ensure_ascii=False))
+
+            raise SystemExit(0 if resp.get("ok") else 1)
+
+    
 
     except SystemExit:
 
@@ -973,7 +1060,6 @@ def main() -> int:
         print(f"[monitoring] shortcut failed: {_ex}")
 
     # --- /Monitoring shortcuts ---
-
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_key:
