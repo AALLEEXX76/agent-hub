@@ -788,7 +788,20 @@ def main() -> int:
         _tl = _t.lower()
 
 
-        # 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck
+        def _parse_json_maybe(x):
+
+            try:
+
+                import json as _json
+
+                return _json.loads(x) if x else None
+
+            except Exception:
+
+                return None
+
+
+        # 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck (verbose JSON)
 
         if _tl.startswith("monitoring:") and ("zabbix quickcheck" in _tl or "zabbix_quickcheck" in _tl):
 
@@ -811,7 +824,112 @@ def main() -> int:
             raise SystemExit(0 if resp.get("ok") else 1)
 
 
-        # 2) monitoring: zabbix agent info -> Hand v2 zabbix_agent_info
+        # 1b) monitoring: zabbix status -> alias to zabbix_quickcheck (short OK/FAIL + reason)
+
+
+        if _tl.startswith("monitoring:") and ("zabbix status" in _tl or "zabbix_status" in _tl):
+
+
+            _aeu = os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
+
+
+            _chat_id_env = os.environ.get("TG_CHAT_ID")
+
+
+            _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
+
+
+            _params = {"action": "zabbix_quickcheck", "mode": "check", "args": {}}
+
+
+            resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
+
+
+            resp = normalize_exec_response("ssh: run", resp)
+
+
+
+            out = str(resp.get("stdout") or resp.get("text") or "").strip()
+
+
+            obj = _parse_json_maybe(out) if out else None
+
+
+            reason = None
+
+
+            if isinstance(obj, dict):
+
+
+                reason = obj.get("reason") or obj.get("summary")
+
+
+            if not reason:
+
+
+                arts = resp.get("artifacts") or []
+
+
+                if isinstance(arts, list):
+
+
+                    for a in arts:
+
+
+                        if isinstance(a, dict) and a.get("name") == "zabbix_quickcheck":
+
+
+                            v = a.get("value")
+
+
+                            if isinstance(v, dict):
+
+
+                                reason = v.get("reason") or v.get("summary")
+
+
+                            break
+
+
+
+            ok = bool(resp.get("ok"))
+
+
+            status = "OK" if ok else "FAIL"
+
+
+            msg = (str(reason).strip() if reason else "unknown")
+
+
+
+            # summary for agent_runner.py
+
+
+            print(f"[plan] summary: zabbix status {status}")
+
+
+
+            # short human output
+
+
+            print("OK" if ok else f"FAIL: {msg}")
+
+
+
+            # final JSON for runner parser (must start at line-beginning with '{')
+
+
+            import json as _json
+
+
+            print(_json.dumps({"ok": ok, "status": status, "reason": (None if ok else msg), "source_action": "zabbix_quickcheck"}, ensure_ascii=False))
+
+
+            raise SystemExit(0 if ok else 1)
+
+
+
+        # 2) monitoring: zabbix agent info -> Hand v2 zabbix_agent_info (pretty JSON)
 
         if _tl.startswith("monitoring:") and ("zabbix agent info" in _tl or "zabbix-agent info" in _tl):
 
@@ -830,17 +948,7 @@ def main() -> int:
 
             out = str(resp.get("stdout") or resp.get("text") or "").strip()
 
-            obj = None
-
-            try:
-
-                import json as _json
-
-                obj = _json.loads(out) if out else None
-
-            except Exception:
-
-                obj = None
+            obj = _parse_json_maybe(out) if out else None
 
             if obj is None:
 
@@ -863,6 +971,7 @@ def main() -> int:
         print(f"[monitoring] shortcut failed: {_ex}")
 
     # --- /Monitoring shortcuts ---
+
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_key:
