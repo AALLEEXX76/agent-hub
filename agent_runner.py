@@ -133,6 +133,12 @@ def short_summary(brain_stdout: str, brain_stderr: str = "", ok: bool = True, ex
                 return t[:240]
             if t.startswith("[exec") and "ERROR" in t:
                 return t[:240]
+        # если stderr пустой — попробуем взять [plan] summary даже при FAIL (shortcut-ветки)
+        for line in (brain_stdout or "").splitlines():
+            if line.startswith("[plan] summary:"):
+                msg = line.split(":", 1)[1].strip()
+                return (msg[:240] if msg else f"error (exit_code={exit_code})")
+
         return f"error (exit_code={exit_code})"
 
     for line in (brain_stdout or "").splitlines():

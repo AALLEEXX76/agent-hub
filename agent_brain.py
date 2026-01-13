@@ -921,8 +921,27 @@ def main() -> int:
 
             _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
 
-            _params = {"action": "zabbix_quickcheck", "mode": "check", "args": {}}
+            _args = {}
 
+            m = re.search(r"\bport\s*=\s*(\d+)", _tl)
+
+            if m:
+
+                _args["port"] = int(m.group(1))
+
+            m = re.search(r"\ballowed_ips\s*=\s*(\[[^\]]*\])", _tl)
+
+            if m:
+
+                try:
+
+                    _args["allowed_ips"] = json.loads(m.group(1).replace("'", '"'))
+
+                except Exception:
+
+                    _args["allowed_ips"] = [x.strip() for x in m.group(1).strip('[]').split(',') if x.strip()]
+
+            _params = {"action": "zabbix_quickcheck", "mode": "check", "args": _args}
             resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
 
             resp = normalize_exec_response("ssh: run", resp)
@@ -949,8 +968,27 @@ def main() -> int:
 
             _chat_id = int(_chat_id_env) if (_chat_id_env and _chat_id_env.isdigit()) else None
 
-            _params = {"action": "zabbix_quickcheck", "mode": "check", "args": {}}
+            _args = {}
 
+            m = re.search(r"\bport\s*=\s*(\d+)", _tl)
+
+            if m:
+
+                _args["port"] = int(m.group(1))
+
+            m = re.search(r"\ballowed_ips\s*=\s*(\[[^\]]*\])", _tl)
+
+            if m:
+
+                try:
+
+                    _args["allowed_ips"] = json.loads(m.group(1).replace("'", '"'))
+
+                except Exception:
+
+                    _args["allowed_ips"] = [x.strip() for x in m.group(1).strip('[]').split(',') if x.strip()]
+
+            _params = {"action": "zabbix_quickcheck", "mode": "check", "args": _args}
             resp = call_agent_exec(_aeu, "ssh: run", _chat_id, params=_params)
 
             resp = normalize_exec_response("ssh: run", resp)
