@@ -845,7 +845,7 @@ def main() -> int:
 
     
 
-            ok = bool(docker_ok and health_ok)
+            ok = bool(docker_ok and health_ok and (caddy_errs == 0))
 
             status = "OK" if ok else "FAIL"
 
@@ -887,7 +887,7 @@ def main() -> int:
 
                 "status": status,
 
-                "reason": None if ok else ("http probe failed" if not http_ok else ("healthz not ok" if not health_ok else "docker_status failed")),
+                "reason": None if ok else ("http probe failed" if not http_ok else ("healthz not ok" if not health_ok else ("docker_status failed" if not docker_ok else f"caddy errors last 5m: {caddy_errs}"))),
 
                 "checks": {
                     "http_probe": {
