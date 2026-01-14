@@ -827,7 +827,7 @@ def main() -> int:
 
             r_health = _call_ssh_action("healthz", {})
 
-            r_caddy  = _call_ssh_action("caddy_logs", {"since_seconds": 300, "tail": 200})
+            r_caddy  = _call_ssh_action("caddy_logs", {"since_seconds": 300, "tail": 200, "only_errors": True})
 
     
 
@@ -849,6 +849,28 @@ def main() -> int:
 
             status = "OK" if ok else "FAIL"
 
+
+            def _curl_code(url: str, timeout_s: int = 3) -> int:
+                import subprocess
+                try:
+                    p = subprocess.run(
+                        ["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout_s), url],
+                        capture_output=True, text=True
+                    )
+                    if p.returncode != 0:
+                        return 0
+                    t = (p.stdout or "").strip()
+                    return int(t) if t.isdigit() else 0
+                except Exception:
+                    return 0
+
+            code_root = _curl_code("https://ii-bot-nout.ru/")
+            code_healthz = _curl_code("https://ii-bot-nout.ru/healthz")
+
+            http_ok = (code_root == 200 and code_healthz == 200)
+            if not http_ok:
+                ok = False
+                status = "FAIL"
     
 
             extra = f" (caddy_errors_5m={caddy_errs})" if caddy_errs else ""
@@ -865,9 +887,14 @@ def main() -> int:
 
                 "status": status,
 
-                "reason": None if ok else ("healthz not ok" if not health_ok else "docker_status failed"),
+                "reason": None if ok else ("http probe failed" if not http_ok else ("healthz not ok" if not health_ok else "docker_status failed")),
 
                 "checks": {
+                    "http_probe": {
+                        "ok": bool(http_ok),
+                        "root_http": int(code_root),
+                        "healthz_http": int(code_healthz),
+                    },
 
                     "docker_status": {
 
