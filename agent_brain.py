@@ -938,7 +938,40 @@ def main() -> int:
 
     
 
-        # 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck (verbose JSON)
+        
+        # monitoring: caddy errors since_seconds=300 -> Hand v2 caddy_logs (only_errors)
+        if _tl.startswith("monitoring:") and ("caddy errors" in _tl or "caddy_errors" in _tl):
+            m = re.search(r"\bsince_seconds\s*=\s*(\d+)", _tl)
+            since_s = int(m.group(1)) if m else 300
+            if since_s < 1:
+                since_s = 300
+            if since_s > 86400:
+                since_s = 86400
+
+            r_caddy = _call_ssh_action("caddy_logs", {"since_seconds": since_s, "tail": 200, "only_errors": True})
+
+            caddy_text = str(r_caddy.get("stdout") or r_caddy.get("text") or "")
+            caddy_errs = caddy_text.count('\"level\":\"error\"') + caddy_text.count('"level":"error"')
+
+            ok = bool(r_caddy.get("ok"))
+            status = "OK" if ok else "FAIL"
+            extra = f" (errors={caddy_errs})" if caddy_errs else " (no errors)"
+
+            print(f"[plan] summary: caddy errors {status} since_seconds={since_s}"+extra)
+
+            import json as _json
+            out = {
+                "ok": ok,
+                "status": status,
+                "since_seconds": int(since_s),
+                "error_count": int(caddy_errs),
+                "request_id": r_caddy.get("request_id"),
+                "text": caddy_text,
+            }
+            print(_json.dumps(out, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+
+# 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck (verbose JSON)
 
         if _tl.startswith("monitoring:") and ("zabbix quickcheck" in _tl or "zabbix_quickcheck" in _tl):
 
