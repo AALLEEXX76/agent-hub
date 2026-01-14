@@ -827,7 +827,7 @@ def main() -> int:
 
             r_health = _call_ssh_action("healthz", {})
 
-            r_caddy  = _call_ssh_action("caddy_logs", {"tail": 30})
+            r_caddy  = _call_ssh_action("caddy_logs", {"since_seconds": 300, "tail": 200})
 
     
 
@@ -851,7 +851,7 @@ def main() -> int:
 
     
 
-            extra = f" (caddy_errors_tail={caddy_errs})" if caddy_errs else ""
+            extra = f" (caddy_errors_5m={caddy_errs})" if caddy_errs else ""
 
             print(f"[plan] summary: server status {status}"+extra)
 
@@ -889,7 +889,7 @@ def main() -> int:
 
                     },
 
-                    "caddy_logs_tail": {
+                    "caddy_logs_5m": {
 
                         "ok": bool(r_caddy.get("ok")),
 
