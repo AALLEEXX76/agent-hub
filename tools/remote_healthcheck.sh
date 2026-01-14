@@ -1,3 +1,5 @@
+# Optional: run snapshot after successful apply (manual trigger)
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -19,3 +21,9 @@ curl -fsS -X POST 'https://ii-bot-nout.ru/webhook/agent-exec' \
 
 echo "--- audit match (server) ---"
 ssh ii-bot-nout "tail -n 800 /var/log/iibot/audit.jsonl | grep -F '$RID' || echo 'AUDIT NOT FOUND'"
+
+# Optional: snapshot (local)
+if [ "${MAKE_IIBOT_SNAPSHOT:-0}" = "1" ]; then
+  echo "--- snapshot (local) ---"
+  ./tools/make_iibot_snapshot.sh
+fi
