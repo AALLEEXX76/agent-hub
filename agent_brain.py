@@ -1218,6 +1218,37 @@ def main() -> int:
         return
     # --- /n8n status shortcut
 
+    # --- n8n logs shortcut (rule-based)
+    if user_task.lower().startswith("monitoring: n8n logs"):
+        import json
+
+        # parse last=N (default 200)
+        last = 200
+        try:
+            parts = user_task.split()
+            for p2 in parts:
+                if p2.startswith("last="):
+                    last = int(p2.split("=",1)[1])
+        except Exception:
+            last = 200
+
+        params = {
+            "action": "compose_logs",
+            "mode": "check",
+            "args": {"project_dir": "/opt/n8n", "tail": last},
+        }
+
+        r_logs = call_agent_exec(agent_exec_url, "ssh: run", chat_id, timeout_s=60, params=params)
+        ok = bool(r_logs.get("ok"))
+
+        summary = "n8n logs OK" if ok else "n8n logs FAIL"
+        print(f"[plan] summary: {summary} (tail={last})")
+
+        out = {"ok": ok, "summary": summary, "brain_report": {"tail": last, "compose_logs": r_logs}}
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /n8n logs shortcut
+
 # --- /Monitoring shortcuts ---
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
