@@ -1288,6 +1288,32 @@ def main() -> int:
         return
     # --- /n8n restart shortcut
 
+    # --- postgres status shortcut (rule-based)
+    if user_task.lower().startswith("monitoring: postgres status"):
+        import json
+
+        params = {
+            "action": "compose_ps",
+            "mode": "check",
+            "args": {"project_dir": "/opt/n8n"},
+        }
+
+        r_ps = call_agent_exec(agent_exec_url, "ssh: run", chat_id, timeout_s=30, params=params)
+        ok = bool(r_ps.get("ok"))
+
+        stdout = (r_ps.get("stdout") or "").lower()
+        pg_up = ("postgres" in stdout) and ("up" in stdout)
+
+        ok = bool(ok and pg_up)
+        summary = "postgres status OK" if ok else "postgres status FAIL"
+
+        print(f"[plan] summary: {summary} (pg_up={pg_up})")
+
+        out = {"ok": ok, "summary": summary, "brain_report": {"compose_ps": r_ps}}
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /postgres status shortcut
+
 # --- /Monitoring shortcuts ---
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
