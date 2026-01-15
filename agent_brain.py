@@ -1249,6 +1249,45 @@ def main() -> int:
         return
     # --- /n8n logs shortcut
 
+    # --- n8n restart shortcut (HIGH + confirm)
+    if user_task.lower().startswith("monitoring: n8n restart"):
+        import json
+
+        # parse confirm=TOKEN (required for apply)
+        confirm = ""
+        try:
+            parts = user_task.split()
+            for p2 in parts:
+                if p2.startswith("confirm="):
+                    confirm = p2.split("=", 1)[1].strip()
+        except Exception:
+            confirm = ""
+
+        mode = "apply" if confirm else "check"
+
+        params = {
+            "action": "compose_restart",
+            "mode": mode,
+            "args": {"project_dir": "/opt/n8n"},
+        }
+        if confirm:
+            params["confirm"] = confirm
+
+        r = call_agent_exec(agent_exec_url, "ssh: run", chat_id, timeout_s=60, params=params)
+        ok = bool(r.get("ok"))
+
+        if mode == "check" and (not ok):
+            summary = "n8n restart CHECK blocked (need confirm)"
+        else:
+            summary = "n8n restart OK" if ok else "n8n restart FAIL"
+
+        print(f"[plan] summary: {summary} (mode={mode})")
+
+        out = {"ok": ok, "summary": summary, "brain_report": {"mode": mode, "confirm_set": bool(confirm), "result": r}}
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /n8n restart shortcut
+
 # --- /Monitoring shortcuts ---
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
