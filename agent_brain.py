@@ -1157,7 +1157,68 @@ def main() -> int:
 
         print(f"[monitoring] shortcut failed: {_ex}")
 
-    # --- /Monitoring shortcuts ---
+        # --- n8n status shortcut (rule-based)
+    if user_task.lower().startswith("monitoring: n8n status"):
+        import os as _os, json
+        import httpx
+
+        base_url = _os.getenv("N8N_BASE_URL", "https://ii-bot-nout.ru").rstrip("/")
+        errors_window = 300
+
+        def _http_ok(url: str, timeout: float = 8.0):
+            try:
+                r = httpx.get(url, timeout=timeout, follow_redirects=True)
+                return (200 <= r.status_code < 300), r.status_code
+            except Exception:
+                return False, 0
+
+        def _ssh_run(action: str, args: dict):
+            params = {"action": action, "mode": "check", "args": args}
+            return call_agent_exec(agent_exec_url, "ssh: run", chat_id, timeout_s=30, params=params)
+
+        ok_root, code_root = _http_ok(f"{base_url}/")
+        ok_health, code_health = _http_ok(f"{base_url}/healthz")
+
+        r_compose = _ssh_run("compose_ps", {"project_dir": "/opt/n8n"})
+        r_healthz = _ssh_run("healthz", {})
+        r_caddy_err = _ssh_run("caddy_logs", {"since_seconds": errors_window, "tail": 200, "only_errors": True})
+
+        compose_stdout = (r_compose.get("stdout") or "")
+        n8n_up = ("n8n" in compose_stdout.lower()) and ("up" in compose_stdout.lower())
+
+        caddy_errs = (r_caddy_err.get("stdout") or "").strip()
+        has_caddy_errors = (len(caddy_errs) > 0) and ('-- No entries --' not in caddy_errs)
+
+        ok = bool(ok_root and ok_health and r_compose.get("ok") and r_healthz.get("ok") and n8n_up and (not has_caddy_errors))
+        summary = "n8n status OK" if ok else "n8n status FAIL"
+
+        print(f"[plan] summary: {summary} (root={code_root}, healthz={code_health}, n8n_up={n8n_up}, caddy_errors={int(has_caddy_errors)})")
+
+        out = {
+            "ok": ok,
+            "summary": summary,
+            "brain_report": {
+                "http": {
+                    "base_url": base_url,
+                    "root": {"ok": ok_root, "status_code": code_root},
+                    "healthz": {"ok": ok_health, "status_code": code_health},
+                },
+                "compose_ps": r_compose,
+                "healthz_action": r_healthz,
+                "caddy_errors": {
+                    "since_seconds": errors_window,
+                    "has_errors": has_caddy_errors,
+                    "raw": caddy_errs[:2000],
+                    "result": r_caddy_err,
+                },
+            },
+        }
+
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /n8n status shortcut
+
+# --- /Monitoring shortcuts ---
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if not anthropic_key:
