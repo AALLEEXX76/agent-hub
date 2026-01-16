@@ -670,6 +670,7 @@ def validate_handv2_args(action: str, args: Any, manifests: Optional[List[Dict[s
 
 
 def main() -> int:
+    global json
     load_env()
 
     task_text = ' '.join(sys.argv[1:]).strip()
@@ -1220,7 +1221,6 @@ def main() -> int:
 
     # --- n8n logs shortcut (rule-based)
     if user_task.lower().startswith("monitoring: n8n logs"):
-        import json
 
         # parse last=N (default 200)
         last = 200
@@ -1251,7 +1251,6 @@ def main() -> int:
 
     # --- n8n restart shortcut (HIGH + confirm)
     if user_task.lower().startswith("monitoring: n8n restart"):
-        import json
 
         # parse confirm=TOKEN (required for apply)
         confirm = ""
@@ -1290,7 +1289,6 @@ def main() -> int:
 
     # --- postgres status shortcut (rule-based)
     if user_task.lower().startswith("monitoring: postgres status"):
-        import json
 
         params = {
             "action": "compose_ps",
@@ -1313,6 +1311,18 @@ def main() -> int:
         print(json.dumps(out, ensure_ascii=False))
         return
     # --- /postgres status shortcut
+
+    # --- disk quickcheck shortcut (rule-based)
+    if user_task.lower().startswith("monitoring: disk quickcheck"):
+        params = {"action": "disk_quickcheck", "mode": "check", "args": {}}
+        r = call_agent_exec(agent_exec_url, "ssh: run", chat_id, timeout_s=30, params=params)
+        ok = bool(r.get("ok", False))
+        summary = "disk quickcheck OK" if ok else "disk quickcheck FAIL"
+        print(f"[plan] summary: {summary}")
+        out = {"ok": ok, "summary": summary, "brain_report": r}
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /disk quickcheck shortcut
 
 # --- /Monitoring shortcuts ---
 
