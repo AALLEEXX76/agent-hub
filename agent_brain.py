@@ -1760,11 +1760,11 @@ def main() -> int:
                 print(json.dumps(report, ensure_ascii=False))
                 raise SystemExit(1)
 
-            if state not in ("present", "absent"):
+            if state not in ("present", "absent", "block"):
                 report = {
                     "ok": False,
                     "exit_code": 1,
-                    "summary": "site route FAIL (state must be present|absent)",
+                    "summary": "site route FAIL (state must be present|absent|block)",
                     "results": [],
                 }
                 print(json.dumps(report, ensure_ascii=False))
