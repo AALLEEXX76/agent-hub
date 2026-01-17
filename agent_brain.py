@@ -1730,6 +1730,102 @@ def main() -> int:
             print(json.dumps(report, ensure_ascii=False))
             raise SystemExit(1)
 
+
+    if user_task.lower().startswith("site: route"):
+        # Examples:
+        #   site: route name=demo-site port=18080
+        #   site: route name=demo-site port=18080 confirm=ROUTE_DEMO_SITE   (requires ALLOW_DANGEROUS=1)
+        #   site: route name=demo-site state=absent confirm=UNROUTE_DEMO_SITE
+        try:
+            raw = user_task.strip()
+            parts = raw.split()
+            kv = {}
+            for tok in parts[2:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            port_raw = (kv.get("port") or "").strip()
+            state = (kv.get("state") or "present").strip().lowerlower() if False else (kv.get("state") or "present").strip().lower()
+            confirm = (kv.get("confirm") or "").strip()
+
+            if not name:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site route FAIL (missing name)",
+                    "results": [],
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            if state not in ("present", "absent"):
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site route FAIL (state must be present|absent)",
+                    "results": [],
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            port = 0
+            if state == "present":
+                try:
+                    port = int(port_raw)
+                except Exception:
+                    port = 0
+                if port <= 0:
+                    report = {
+                        "ok": False,
+                        "exit_code": 1,
+                        "summary": "site route FAIL (port required for state=present)",
+                        "results": [],
+                    }
+                    print(json.dumps(report, ensure_ascii=False))
+                    raise SystemExit(1)
+
+            mode = "apply" if confirm else "check"
+
+            params = {
+                "action": "caddy_site_route",
+                "mode": mode,
+                "args": {
+                    "name": name,
+                    "state": state,
+                },
+            }
+            if state == "present":
+                params["args"]["port"] = port
+            if confirm:
+                params["confirm"] = confirm
+
+            resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=params)
+            resp = normalize_exec_response("ssh: run", resp)
+
+            ok = bool(resp.get("ok", False))
+            report = {
+                "ok": ok,
+                "exit_code": int(resp.get("exit_code", 0) or 0),
+                "summary": f"site route {'OK' if ok else 'FAIL'} ({name}, state={state})",
+                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": f"site route FAIL (exception: {_ex})",
+                "results": [],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
     if not anthropic_key:
         eprint("ERROR: ANTHROPIC_API_KEY not found. Add it to ~/agent-hub/.agent_env")
         return 1
