@@ -1553,6 +1553,65 @@ def main() -> int:
             }
             print(json.dumps(report, ensure_ascii=False))
             raise SystemExit(1)
+
+    if user_task.lower().startswith("site: logs"):
+        # Example:
+        #   site: logs name=demo-site last=80
+        try:
+            raw = user_task.strip()
+            parts = raw.split()
+            kv = {}
+            for tok in parts[2:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            last = int(kv.get("last") or "80")
+
+            if not name:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site logs FAIL (missing name)",
+                    "results": [],
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            params = {
+                "action": "compose_logs",
+                "mode": "check",
+                "args": {
+                    "project_dir": f"/opt/sites/{name}",
+                    "tail": last,
+                },
+            }
+
+            resp = call_agent_exec(agent_exec_url, "ssh: run", params=params, chat_id=chat_id)
+            ok = bool(resp.get("ok", False))
+
+            report = {
+                "ok": ok,
+                "exit_code": 0 if ok else 1,
+                "summary": f"site logs {'OK' if ok else 'FAIL'} ({name})",
+                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": f"site logs FAIL (exception: {_ex})",
+                "results": [],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+
     if not anthropic_key:
         eprint("ERROR: ANTHROPIC_API_KEY not found. Add it to ~/agent-hub/.agent_env")
         return 1
