@@ -1612,6 +1612,124 @@ def main() -> int:
             raise SystemExit(1)
 
 
+
+    if user_task.lower().startswith("site: down"):
+        # Examples:
+        #   site: down name=demo-site
+        #   site: down name=demo-site confirm=DOWN_DEMO_SITE   (requires ALLOW_DANGEROUS=1)
+        try:
+            parts = user_task.strip().split()
+            kv = {}
+            for t in parts[2:]:
+                if "=" in t:
+                    k, v = t.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            if not name:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site down FAIL (missing name)",
+                    "results": [],
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            confirm = (kv.get("confirm") or "").strip()
+            mode = "apply" if confirm else "check"
+
+            params = {
+                "action": "compose_down",
+                "mode": mode,
+                "args": {"project_dir": f"/opt/sites/{name}"},
+            }
+            if confirm:
+                params["confirm"] = confirm
+
+            resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=params)
+            resp = normalize_exec_response("ssh: run", resp)
+            ok = bool(resp.get("ok", False))
+
+            report = {
+                "ok": ok,
+                "exit_code": int(resp.get("exit_code", 0) or 0),
+                "summary": f"site down {'OK' if ok else 'FAIL'} ({name})",
+                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": f"site down FAIL (exception: {_ex})",
+                "results": [],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+
+    if user_task.lower().startswith("site: restart"):
+        # Examples:
+        #   site: restart name=demo-site
+        #   site: restart name=demo-site confirm=RESTART_DEMO_SITE   (requires ALLOW_DANGEROUS=1)
+        try:
+            parts = user_task.strip().split()
+            kv = {}
+            for t in parts[2:]:
+                if "=" in t:
+                    k, v = t.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            if not name:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site restart FAIL (missing name)",
+                    "results": [],
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            confirm = (kv.get("confirm") or "").strip()
+            mode = "apply" if confirm else "check"
+
+            params = {
+                "action": "compose_restart",
+                "mode": mode,
+                "args": {"project_dir": f"/opt/sites/{name}"},
+            }
+            if confirm:
+                params["confirm"] = confirm
+
+            resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=params)
+            resp = normalize_exec_response("ssh: run", resp)
+            ok = bool(resp.get("ok", False))
+
+            report = {
+                "ok": ok,
+                "exit_code": int(resp.get("exit_code", 0) or 0),
+                "summary": f"site restart {'OK' if ok else 'FAIL'} ({name})",
+                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": f"site restart FAIL (exception: {_ex})",
+                "results": [],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
     if not anthropic_key:
         eprint("ERROR: ANTHROPIC_API_KEY not found. Add it to ~/agent-hub/.agent_env")
         return 1
