@@ -1324,6 +1324,89 @@ def main() -> int:
         return
     # --- /disk quickcheck shortcut
 
+
+    # --- Site shortcuts
+    if user_task.lower().startswith("site: init"):
+        # examples:
+        #   site: init name=demo-site domain=demo.local port=18080
+        # defaults: base_dir=/opt/sites, port=18080
+        import re as _re
+
+        def _kv(text: str) -> dict:
+            out = {}
+            for m in _re.finditer(r'(\w+)\s*=\s*("[^"]*"|\S+)', text):
+                k = m.group(1).strip()
+                v = m.group(2).strip()
+                if v.startswith('"') and v.endswith('"'):
+                    v = v[1:-1]
+                out[k] = v
+            return out
+
+        kv = _kv(user_task)
+        name = kv.get("name", "").strip()
+        domain = kv.get("domain", "").strip()
+        base_dir = kv.get("base_dir", "/opt/sites").strip()
+        port_raw = kv.get("port", "18080").strip()
+
+        try:
+            port = int(port_raw)
+        except Exception:
+            port = 18080
+
+        if not name:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": "site init FAIL (name required)",
+                "results": [{
+                    "task": "ssh: run",
+                    "params": {"action": "site_init", "mode": "check", "args": {}},
+                    "response": {
+                        "ok": False,
+                        "exit_code": 1,
+                        "action": "site_init",
+                        "mode": "check",
+                        "stdout": "",
+                        "stderr": "args.name required (use: site: init name=... [domain=..] [port=..])",
+                        "artifacts": [],
+                        "meta": {"changed": False, "warnings": []},
+                    }
+                }],
+            }
+            print(f"[plan] summary: {report['summary']}")
+            print("\n[exec] running actions: 1")
+            print("\n[exec #1] ssh: run (site_init)")
+            print("\n[report] done.")
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+        args = {"name": name, "base_dir": base_dir, "port": port}
+        if domain:
+            args["domain"] = domain
+
+        resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params={
+            "action": "site_init",
+            "mode": "apply",
+            "args": args,
+        })
+        resp = normalize_exec_response("ssh: run", resp)
+
+        ok = bool(resp.get("ok"))
+        report = {
+            "ok": ok,
+            "exit_code": int(resp.get("exit_code", 0) or 0),
+            "summary": f"site init {'OK' if ok else 'FAIL'} ({name})",
+            "results": [{"task": "ssh: run", "params": {"action": "site_init", "mode": "apply", "args": args}, "response": resp}],
+        }
+
+        print(f"[plan] summary: {report['summary']}")
+        print("\n[exec] running actions: 1")
+        print("\n[exec #1] ssh: run (site_init apply)")
+        print("\n[report] done.")
+        print(json.dumps(report, ensure_ascii=False))
+        raise SystemExit(0 if ok else 1)
+    # --- /Site shortcuts
+
 # --- /Monitoring shortcuts ---
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
