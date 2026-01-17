@@ -1411,6 +1411,85 @@ def main() -> int:
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
 
+    
+    if user_task.lower().startswith("site: status"):
+        # Examples:
+        #   site: status name=demo-site
+        try:
+            raw = user_task.strip()
+            parts = raw.split()
+            kv = {}
+            for t in parts[2:]:
+                if "=" in t:
+                    k, v = t.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            if not name:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site status FAIL",
+                    "results": [{
+                        "task": "ssh: run",
+                        "params": {"action": "compose_ps", "mode": "check", "args": {}},
+                        "response": {
+                            "ok": False,
+                            "exit_code": 1,
+                            "action": "compose_ps",
+                            "mode": "check",
+                            "stdout": "",
+                            "stderr": "args.name required (use: site: status name=...)",
+                            "meta": {"changed": False, "warnings": []},
+                            "artifacts": [],
+                        }
+                    }]
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(0)
+
+            project_dir = f"/opt/sites/{name}"
+            params = {"action": "compose_ps", "mode": "check", "args": {"project_dir": project_dir}}
+            resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=params)
+            resp = normalize_exec_response("ssh: run", resp)
+
+            ok = bool(resp.get("ok"))
+            summary = f"site status {'OK' if ok else 'FAIL'} ({name})"
+
+            report = {
+                "ok": ok,
+                "exit_code": int(resp.get("exit_code", 0) or 0),
+                "summary": summary,
+                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0)
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": "site status FAIL",
+                "results": [{
+                    "task": "ssh: run",
+                    "params": {"action": "compose_ps", "mode": "check", "args": {}},
+                    "response": {
+                        "ok": False,
+                        "exit_code": 1,
+                        "action": "compose_ps",
+                        "mode": "check",
+                        "stdout": "",
+                        "stderr": f"site status shortcut error: {_ex}",
+                        "meta": {"changed": False, "warnings": []},
+                        "artifacts": [],
+                    }
+                }]
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0)
+
+
     if user_task.lower().startswith("site: up"):
         # Examples:
         #   site: up name=demo-site
@@ -1458,7 +1537,7 @@ def main() -> int:
             report = {
                 "ok": ok,
                 "exit_code": int(resp.get("exit_code", 0) or 0),
-                "summary": f"site up {"OK" if ok else "FAIL"} ({name})",
+                "summary": f"site up {'OK' if ok else 'FAIL'} ({name})",
                 "results": [{"task": "ssh: run", "params": params, "response": resp}],
             }
             print(json.dumps(report, ensure_ascii=False))
