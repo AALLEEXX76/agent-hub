@@ -1410,6 +1410,70 @@ def main() -> int:
 # --- /Monitoring shortcuts ---
 
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+
+    if user_task.lower().startswith("site: up"):
+        # Examples:
+        #   site: up name=demo-site
+        #   site: up name=demo-site confirm=UP_DEMO_SITE   (requires ALLOW_DANGEROUS=1)
+        try:
+            parts = user_task.strip().split()
+            kv = {}
+            for t in parts[2:]:
+                if "=" in t:
+                    k,v = t.split("=",1)
+                    kv[k.strip()] = v.strip()
+            name = str(kv.get("name","")).strip()
+            if not name:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": "site up FAIL (missing name)",
+                    "results": [{"task": "ssh: run", "params": {}, "response": {
+                        "ok": False,
+                        "exit_code": 1,
+                        "stdout": "",
+                        "stderr": "args.name required (use: site: up name=... [confirm=...])",
+                        "text": "args.name required (use: site: up name=... [confirm=...])",
+                    }}],
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            base_dir = str(kv.get("base_dir","/opt/sites")).strip() or "/opt/sites"
+            project_dir = f"{base_dir.rstrip("/")}/{name}"
+            confirm = str(kv.get("confirm","")).strip()
+            _mode = "apply" if confirm else "check"
+
+            params = {
+                "action": "compose_up",
+                "mode": _mode,
+                "args": {"project_dir": project_dir},
+            }
+            if confirm:
+                params["confirm"] = confirm
+
+            resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=params)
+            resp = normalize_exec_response("ssh: run", resp)
+            ok = bool(resp.get("ok"))
+            report = {
+                "ok": ok,
+                "exit_code": int(resp.get("exit_code", 0) or 0),
+                "summary": f"site up {"OK" if ok else "FAIL"} ({name})",
+                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": f"site up FAIL (exception: {_ex})",
+                "results": [],
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
     if not anthropic_key:
         eprint("ERROR: ANTHROPIC_API_KEY not found. Add it to ~/agent-hub/.agent_env")
         return 1
