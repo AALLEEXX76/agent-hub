@@ -1731,6 +1731,11 @@ def main() -> int:
             raise SystemExit(1)
 
 
+    # aliases: site: block / site: unblock
+    if user_task.lower().startswith("site: block"):
+        user_task = user_task.replace("site: block", "site: route", 1) + " state=block"
+    if user_task.lower().startswith("site: unblock"):
+        user_task = user_task.replace("site: unblock", "site: route", 1) + " state=present"
     if user_task.lower().startswith("site: route"):
         # Examples:
         #   site: route name=demo-site port=18080
