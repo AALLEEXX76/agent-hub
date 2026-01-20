@@ -1705,6 +1705,92 @@ def main() -> int:
             print(json.dumps(report, ensure_ascii=False))
             raise SystemExit(1)
 
+
+    if user_task.lower().startswith("site: deploy"):
+        # Examples:
+        #   site: deploy name=demo2
+        #   site: deploy name=demo2 confirm=DEPLOY_DEMO2   (apply)
+        try:
+            parts = user_task.strip().split()
+            kv = {}
+            for t in parts[2:]:
+                if "=" in t:
+                    k, v = t.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            if not name:
+                report = {"ok": False, "exit_code": 1, "summary": "site deploy FAIL (missing name)", "results": []}
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            confirm = (kv.get("confirm") or "").strip()
+            mode = "apply" if confirm else "check"
+            project_dir = f"/opt/sites/{name}"
+
+            results = []
+
+            # 1) pull
+            pull_params = {"action": "compose_pull", "mode": mode, "args": {"project_dir": project_dir}}
+            if confirm:
+                pull_params["confirm"] = confirm
+            pull_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=pull_params)
+            pull_resp = normalize_exec_response("ssh: run", pull_resp)
+            results.append({"task": "ssh: run", "params": pull_params, "response": pull_resp})
+
+            # 2) up
+            up_params = {"action": "compose_up", "mode": mode, "args": {"project_dir": project_dir}}
+            if confirm:
+                up_params["confirm"] = confirm
+            up_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=up_params)
+            up_resp = normalize_exec_response("ssh: run", up_resp)
+            results.append({"task": "ssh: run", "params": up_params, "response": up_resp})
+
+            # 3) status (compose_ps + HTTP HEAD)
+            ps_params = {"action": "compose_ps", "mode": "check", "args": {"project_dir": project_dir}}
+            ps_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=ps_params)
+            ps_resp = normalize_exec_response("ssh: run", ps_resp)
+
+            stdout = (ps_resp.get("stdout") or "")
+            up = bool(ps_resp.get("ok")) and (" Up " in stdout)
+
+            base_url = (os.environ.get("N8N_BASE_URL") or "https://ii-bot-nout.ru").rstrip("/")
+            http_url = f"{base_url}/{name}/"
+            http_code = None
+            http_err = ""
+            try:
+                import urllib.request
+                import urllib.error
+                req = urllib.request.Request(http_url, method="HEAD")
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    http_code = int(getattr(r, "status", 0) or 0)
+            except urllib.error.HTTPError as e:
+                http_code = int(getattr(e, "code", 0) or 0)
+                http_err = str(e)
+            except Exception as e:
+                http_code = None
+                http_err = str(e)
+
+            ok = (http_code == 404) or (http_code == 200 and up)
+            summary_http = http_code if http_code is not None else "ERR"
+            summary = f"site deploy {'OK' if ok else 'FAIL'} (name={name} up={up} http={summary_http})"
+            if http_code == 502:
+                summary += f" | hint: site: up name={name} confirm=UP_{name.upper().replace('-', '_')}"
+
+            results.append({"task": "ssh: run", "params": ps_params, "response": ps_resp})
+            results.append({"task": "http: head", "params": {"url": http_url}, "response": {"ok": (http_code in (200,404)), "url": http_url, "http_code": http_code, "error": http_err}})
+
+            report = {"ok": ok, "exit_code": 0 if ok else 1, "summary": summary, "results": results}
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {"ok": False, "exit_code": 1, "summary": f"site deploy FAIL (exception: {_ex})", "results": []}
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+
     if user_task.lower().startswith("site: logs"):
         # Example:
         #   site: logs name=demo-site last=80
