@@ -1562,14 +1562,53 @@ def main() -> int:
             resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=params)
             resp = normalize_exec_response("ssh: run", resp)
 
-            ok = bool(resp.get("ok"))
-            summary = f"site status {'OK' if ok else 'FAIL'} ({name})"
+            # Compose status (containers)
+            compose_ok = bool(resp.get("ok"))
+            stdout = (resp.get("stdout") or "")
+            up = compose_ok and (" Up " in stdout)
+
+            # HTTP status by public route
+            http_url = f"https://ii-bot-nout.ru/{name}/"
+            http_code = None
+            http_err = ""
+            try:
+                import urllib.request
+                import urllib.error
+                req = urllib.request.Request(http_url, method="HEAD")
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    http_code = int(getattr(r, "status", 0) or 0)
+            except urllib.error.HTTPError as e:
+                http_code = int(getattr(e, "code", 0) or 0)
+                http_err = str(e)
+            except Exception as e:
+                http_code = None
+                http_err = str(e)
+
+            # Overall OK/FAIL logic:
+            # - 200 -> OK only if containers are Up
+            # - 404 -> OK (route blocked / absent)
+            # - 502 -> FAIL (route exists but backend is down)
+            # - other / errors -> FAIL
+            ok = (http_code == 404) or (http_code == 200 and up)
+
+            summary_http = http_code if http_code is not None else "ERR"
+            summary = f"site status {'OK' if ok else 'FAIL'} (name={name} up={up} http={summary_http})"
+
+            http_resp = {
+                "ok": (http_code in (200, 404)),
+                "url": http_url,
+                "http_code": http_code,
+                "error": http_err,
+            }
 
             report = {
                 "ok": ok,
                 "exit_code": int(resp.get("exit_code", 0) or 0),
                 "summary": summary,
-                "results": [{"task": "ssh: run", "params": params, "response": resp}],
+                "results": [
+                    {"task": "ssh: run", "params": params, "response": resp},
+                    {"task": "http: head", "params": {"url": http_url}, "response": http_resp},
+                ],
             }
             print(json.dumps(report, ensure_ascii=False))
             raise SystemExit(0)
