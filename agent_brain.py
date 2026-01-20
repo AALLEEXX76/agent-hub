@@ -1594,6 +1594,8 @@ def main() -> int:
 
             summary_http = http_code if http_code is not None else "ERR"
             summary = f"site status {'OK' if ok else 'FAIL'} (name={name} up={up} http={summary_http})"
+            if http_code == 502:
+                summary += f" | hint: site: up name={name} confirm=UP_{name.upper().replace('-', '_')}"
 
             http_resp = {
                 "ok": (http_code in (200, 404)),
