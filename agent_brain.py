@@ -1551,7 +1551,7 @@ def main() -> int:
             {"task": "ssh: run", "params": {"action": "docker_status", "mode": "check", "args": {}}, "response": resp0}
         ]
 
-        base = "https://ii-bot-nout.ru"
+        base = os.environ.get("SITE_BASE_URL") or agent_exec_url.split("/webhook/")[0].rstrip("/")
         sites = []
 
         # 2) HEAD probe each route
@@ -1911,6 +1911,79 @@ def main() -> int:
             print(json.dumps(report, ensure_ascii=False))
             raise SystemExit(1)
 
+
+
+
+    if user_task.lower().startswith("site: delete"):
+        # Examples:
+        #   site: delete name=demo5 confirm=DELETE_DEMO5
+        # Does: caddy_site_route(state=absent) + compose_down(apply)
+        try:
+            parts = user_task.strip().split()
+            kv = {}
+            for t in parts[2:]:
+                if "=" in t:
+                    k, v = t.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            name = (kv.get("name") or "").strip()
+            confirm = (kv.get("confirm") or "").strip()
+
+            if not name:
+                report = {"ok": False, "exit_code": 1, "summary": "site delete FAIL (missing name)", "results": []}
+                print(f"[plan] summary: {report['summary']}")
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            if not confirm:
+                report = {"ok": False, "exit_code": 1, "summary": "site delete FAIL (confirm required)", "results": []}
+                print(f"[plan] summary: {report['summary']}")
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            # 1) remove route
+            p1 = {
+                "action": "caddy_site_route",
+                "mode": "apply",
+                "args": {"name": name, "state": "absent"},
+                "confirm": confirm,
+            }
+            r1 = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=p1)
+            r1 = normalize_exec_response("ssh: run", r1)
+
+            # 2) down containers
+            p2 = {
+                "action": "compose_down",
+                "mode": "apply",
+                "args": {"project_dir": f"/opt/sites/{name}"},
+                "confirm": confirm,
+            }
+            r2 = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=p2)
+            r2 = normalize_exec_response("ssh: run", r2)
+
+            ok = bool(r1.get("ok")) and bool(r2.get("ok"))
+            summary = f"site delete {'OK' if ok else 'FAIL'} ({name})"
+
+            report = {
+                "ok": ok,
+                "exit_code": 0 if ok else 1,
+                "summary": summary,
+                "results": [
+                    {"task": "ssh: run", "params": p1, "response": r1},
+                    {"task": "ssh: run", "params": p2, "response": r2},
+                ],
+            }
+            print(f"[plan] summary: {summary}")
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {"ok": False, "exit_code": 1, "summary": f"site delete FAIL (exception: {_ex})", "results": []}
+            print(f"[plan] summary: {report['summary']}")
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
 
 
     if user_task.lower().startswith("site: down"):
