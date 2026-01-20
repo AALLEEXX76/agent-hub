@@ -310,7 +310,9 @@ def _n8n_allowlist() -> set[str]:
     return {x.strip() for x in raw.split(",") if x.strip()}
 
 def _n8n_base() -> str:
-    base = (os.environ.get("N8N_BASE_URL") or "https://ii-bot-nout.ru/api/v1").rstrip("/")
+    base = (os.environ.get("N8N_BASE_URL") or "https://ii-bot-nout.ru").rstrip("/")
+    if not base.endswith("/api/v1"):
+        base = base + "/api/v1"
     return base
 
 def _n8n_key() -> str:
