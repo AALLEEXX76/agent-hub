@@ -1708,6 +1708,11 @@ def main() -> int:
             raise SystemExit(1)
 
 
+    
+    # alias: site: fix -> site: deploy
+    if user_task.lower().startswith("site: fix"):
+        user_task = user_task.replace("site: fix", "site: deploy", 1)
+
     if user_task.lower().startswith("site: deploy"):
         # Examples:
         #   site: deploy name=demo2
