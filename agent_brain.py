@@ -1568,7 +1568,8 @@ def main() -> int:
             up = compose_ok and (" Up " in stdout)
 
             # HTTP status by public route
-            http_url = f"https://ii-bot-nout.ru/{name}/"
+            base_url = (os.environ.get("N8N_BASE_URL") or "https://ii-bot-nout.ru").rstrip("/")
+            http_url = f"{base_url}/{name}/"
             http_code = None
             http_err = ""
             try:
