@@ -1326,6 +1326,115 @@ def main() -> int:
 
 
     # --- Site shortcuts
+
+    if user_task.lower().startswith("site: create"):
+        # examples:
+        #   site: create name=demo4 domain=demo4.local port=18083 confirm=CREATE_DEMO4
+        # creates: site_init(apply) + compose_up(apply) + caddy_site_route(apply state=present)
+        import re as _re
+
+        def _kv(text: str) -> dict:
+            out = {}
+            for m in _re.finditer(r'(\w+)\s*=\s*("[^"]*"|\S+)', text):
+                k = m.group(1).strip()
+                v = m.group(2).strip()
+                if v.startswith('"') and v.endswith('"'):
+                    v = v[1:-1]
+                out[k] = v
+            return out
+
+        kv = _kv(user_task)
+        name = (kv.get("name", "") or "").strip()
+        domain = (kv.get("domain", "") or "").strip()
+        base_dir = (kv.get("base_dir", "/opt/sites") or "/opt/sites").strip()
+        port_raw = (kv.get("port", "18080") or "18080").strip()
+        confirm = (kv.get("confirm", "") or "").strip()
+
+        try:
+            port = int(port_raw)
+        except Exception:
+            port = 18080
+
+        if not name:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": "site create FAIL (name required)",
+                "results": [],
+            }
+            print(f"[plan] summary: {report['summary']}")
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+        if not confirm:
+            report = {
+                "ok": False,
+                "exit_code": 1,
+                "summary": "site create FAIL (confirm required)",
+                "results": [],
+            }
+            print(f"[plan] summary: {report['summary']}")
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+        up_token = "UP_" + name.upper().replace("-", "_")
+        unblock_token = "UNBLOCK_" + name.upper().replace("-", "_")
+
+        # 1) site_init (apply)
+        args_init = {"name": name, "base_dir": base_dir, "port": port}
+        if domain:
+            args_init["domain"] = domain
+
+        r1 = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params={
+            "action": "site_init",
+            "mode": "apply",
+            "args": args_init,
+        })
+        r1 = normalize_exec_response("ssh: run", r1)
+
+        # 2) compose_up (apply)
+        project_dir = f"{base_dir}/{name}"
+        r2 = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params={
+            "action": "compose_up",
+            "mode": "apply",
+            "args": {"project_dir": project_dir},
+            "confirm": up_token,
+        })
+        r2 = normalize_exec_response("ssh: run", r2)
+
+        # 3) route present (apply)
+        r3 = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params={
+            "action": "caddy_site_route",
+            "mode": "apply",
+            "args": {"name": name, "port": port, "state": "present"},
+            "confirm": unblock_token,
+        })
+        r3 = normalize_exec_response("ssh: run", r3)
+
+        ok = bool(r1.get("ok")) and bool(r2.get("ok")) and bool(r3.get("ok"))
+        summary = f"site create {'OK' if ok else 'FAIL'} ({name})"
+
+        report = {
+            "ok": ok,
+            "exit_code": 0 if ok else 1,
+            "summary": summary,
+            "results": [
+                {"task": "ssh: run", "params": {"action": "site_init", "mode": "apply", "args": args_init}, "response": r1},
+                {"task": "ssh: run", "params": {"action": "compose_up", "mode": "apply", "args": {"project_dir": project_dir}, "confirm": up_token}, "response": r2},
+                {"task": "ssh: run", "params": {"action": "caddy_site_route", "mode": "apply", "args": {"name": name, "port": port, "state": "present"}, "confirm": unblock_token}, "response": r3},
+            ],
+        }
+
+        print(f"[plan] summary: {summary}")
+        print("\n[exec] running actions: 3")
+        print("\n[exec #1] ssh: run (site_init apply)")
+        print("\n[exec #2] ssh: run (compose_up apply)")
+        print("\n[exec #3] ssh: run (caddy_site_route apply)")
+        print("\n[report] done.")
+        print(json.dumps(report, ensure_ascii=False))
+        raise SystemExit(0 if ok else 1)
+
+
     if user_task.lower().startswith("site: init"):
         # examples:
         #   site: init name=demo-site domain=demo.local port=18080
