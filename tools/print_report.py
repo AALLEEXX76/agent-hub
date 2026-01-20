@@ -11,13 +11,10 @@ with open(p, "r", encoding="utf-8") as f:
 
 br = r.get("brain_report")
 
-# обычный формат Brain: brain_report.results[0].response
-if isinstance(br, dict) and "results" in br and isinstance(br.get("results"), list) and br["results"]:
-    resp = br["results"][0].get("response", br)
-    print(json.dumps(resp, ensure_ascii=False, indent=2))
-# shortcut-формат: brain_report уже готовый dict
-elif isinstance(br, (dict, list)):
+# Если brain_report уже содержит итог (sites/summary/results) — печатаем целиком
+if isinstance(br, dict):
     print(json.dumps(br, ensure_ascii=False, indent=2))
-# если brain_report отсутствует — печатаем что есть
+elif isinstance(br, list):
+    print(json.dumps(br, ensure_ascii=False, indent=2))
 else:
     print(json.dumps({"brain_report": br, "top": {k: r.get(k) for k in ("ok","exit_code","summary","task","ts_utc")}}, ensure_ascii=False, indent=2))
