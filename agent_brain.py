@@ -1523,6 +1523,62 @@ def main() -> int:
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
 
     
+    
+    if user_task.lower().startswith("site: list"):
+        # examples:
+        #   site: list
+        # Lists sites based on docker containers "<name>-web-1" and probes https://ii-bot-nout.ru/<name>/
+        import re as _re
+        from urllib.request import Request as _Req, urlopen as _urlopen
+        from urllib.error import HTTPError as _HTTPError
+
+        # 1) docker_status (safe) -> find "<name>-web-1"
+        resp0 = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params={
+            "action": "docker_status",
+            "mode": "check",
+            "args": {},
+        })
+        resp0 = normalize_exec_response("ssh: run", resp0)
+
+        names = set()
+        if resp0.get("ok"):
+            for line in str(resp0.get("stdout", "")).splitlines():
+                m = _re.match(r"^([A-Za-z0-9_-]+)-web-1\s", line.strip())
+                if m:
+                    names.add(m.group(1))
+
+        results = [
+            {"task": "ssh: run", "params": {"action": "docker_status", "mode": "check", "args": {}}, "response": resp0}
+        ]
+
+        base = "https://ii-bot-nout.ru"
+        sites = []
+
+        # 2) HEAD probe each route
+        for name in sorted(names):
+            url = f"{base}/{name}/"
+            code = 0
+            err = ""
+            try:
+                req = _Req(url, method="HEAD")
+                with _urlopen(req, timeout=10) as r:
+                    code = int(getattr(r, "status", 0) or 0)
+            except _HTTPError as e:
+                code = int(getattr(e, "code", 0) or 0)
+                err = str(e)
+            except Exception as e:
+                err = str(e)
+
+            sites.append({"name": name, "url": url, "http_code": code, "error": err})
+            results.append({"task": "http: head", "params": {"url": url}, "response": {"ok": (code == 200), "url": url, "http_code": code, "error": err}})
+
+        summary = f"site list OK (count={len(sites)})"
+        report = {"ok": True, "exit_code": 0, "summary": summary, "sites": sites, "results": results}
+        print(f"[plan] summary: {summary}")
+        print(json.dumps(report, ensure_ascii=False))
+        raise SystemExit(0)
+
+
     if user_task.lower().startswith("site: status"):
         # Examples:
         #   site: status name=demo-site
