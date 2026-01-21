@@ -163,6 +163,53 @@ def write_report(payload: Dict[str, Any]) -> Path:
     return fp
 
 
+def _detect_apply(task_text: str, brain_report: Optional[Dict[str, Any]]) -> bool:
+    """
+    True if this task likely performed APPLY (mutating) operation.
+    Heuristics:
+      - explicit "mode=apply" in raw task text
+      - shortcut tasks that include "confirm=" (usually implies apply)
+      - inspect brain_report.results[*].params.mode == "apply"
+    """
+    t = (task_text or "").lower()
+    if "mode=apply" in t:
+        return True
+    if "confirm=" in t:
+        return True
+
+    # try to detect from brain_report
+    if isinstance(brain_report, dict):
+        results = brain_report.get("results")
+        if isinstance(results, list):
+            for r in results:
+                params = (r or {}).get("params") or {}
+                mode = (params.get("mode") or "").lower()
+                if mode == "apply":
+                    return True
+    return False
+
+
+def _run_remote_healthcheck() -> Dict[str, Any]:
+    """
+    Runs tools/remote_healthcheck.sh (no snapshot unless MAKE_IIBOT_SNAPSHOT=1 is set).
+    Captures stdout/stderr and exit code into the report.
+    """
+    script = Path(__file__).resolve().parent / "tools" / "remote_healthcheck.sh"
+    env = _get_child_env()
+    p = subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return {
+        "ok": p.returncode == 0,
+        "exit_code": p.returncode,
+        "stdout": p.stdout,
+        "stderr": p.stderr,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="agent_runner v1.1 (CLI wrapper over agent_brain.py)")
     ap.add_argument("task", nargs="*", help="Task text (in quotes)")
@@ -192,6 +239,11 @@ def main() -> int:
         "brain": brain,
         "brain_report": brain_report,
     }
+
+    # post-apply healthcheck (optional)
+    # runs only after successful APPLY-like tasks (mode=apply / confirm=...)
+    if brain.get("ok") and _detect_apply(task_text, brain_report) and os.environ.get("DISABLE_POST_APPLY_HEALTHCHECK") != "1":
+        report["post_apply_healthcheck"] = _run_remote_healthcheck()
 
     report_path = write_report(report)
 
