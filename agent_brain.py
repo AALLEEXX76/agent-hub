@@ -867,8 +867,10 @@ def main() -> int:
                 except Exception:
                     return 0
 
-            code_root = _curl_code("https://ii-bot-nout.ru/")
-            code_healthz = _curl_code("https://ii-bot-nout.ru/healthz")
+            base_url = os.environ.get("N8N_BASE_URL", "https://ii-bot-nout.ru").rstrip("/")
+
+            code_root = _curl_code(f"{base_url}/")
+            code_healthz = _curl_code(f"{base_url}/healthz")
 
             http_ok = (code_root == 200 and code_healthz == 200)
             if not http_ok:
