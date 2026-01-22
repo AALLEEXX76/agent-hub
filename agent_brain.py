@@ -1627,6 +1627,40 @@ def main() -> int:
             stdout = (resp.get("stdout") or "")
             up = compose_ok and (" Up " in stdout)
 
+            # Route status (Caddyfile): present|absent|block|unknown
+            route_state = "unknown"
+            route_resp = {}
+            try:
+                route_params = {"action": "caddy_site_route", "mode": "check", "args": {"name": name}}
+                r_route = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=route_params)
+                route_resp = normalize_exec_response("ssh: run", r_route)
+                meta = route_resp.get("meta") or {}
+                if isinstance(meta, dict):
+                    st = str(meta.get("state") or meta.get("route_state") or "").strip().lower()
+                    if st in ("present", "absent", "block"):
+                        route_state = st
+
+                if route_state == "unknown":
+                    txt = (str(route_resp.get("stdout") or "") + "\n" + str(route_resp.get("text") or "")).lower()
+                    if "state=absent" in txt or "\nabsent" in txt:
+                        route_state = "absent"
+                    elif "state=block" in txt or "\nblock" in txt or "blocked" in txt:
+                        route_state = "block"
+                    elif "state=present" in txt or "\npresent" in txt or "handle_path" in txt:
+                        route_state = "present"
+            except Exception:
+                route_resp = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "action": "caddy_site_route",
+                    "mode": "check",
+                    "stdout": "",
+                    "stderr": "",
+                    "text": "route check failed",
+                    "meta": {"changed": False, "warnings": []},
+                    "artifacts": [],
+                }
+
             # HTTP status by public route
             base_url = (os.environ.get("N8N_BASE_URL") or "https://ii-bot-nout.ru").rstrip("/")
             http_url = f"{base_url}/{name}/"
@@ -1645,17 +1679,32 @@ def main() -> int:
                 http_code = None
                 http_err = str(e)
 
+            # Normalize route_state by observed HTTP
+            # - 200 => route is present
+            # - 404 => could be absent or block; if route check says present -> treat as block
+            # - 502 => route is present but backend is down
+            if http_code == 200:
+                route_state = "present"
+            elif http_code == 404 and route_state == "present":
+                route_state = "block"
+            elif http_code == 502 and route_state == "unknown":
+                route_state = "present"
+
             # Overall OK/FAIL logic:
-            # - 200 -> OK only if containers are Up
-            # - 404 -> OK (route blocked / absent)
-            # - 502 -> FAIL (route exists but backend is down)
-            # - other / errors -> FAIL
-            ok = (http_code == 404) or (http_code == 200 and up)
+            # OK:
+            # - http=200 AND containers up AND route=present
+            # - http=404 AND route in (absent|block)  (blocked or not routed)
+            # FAIL:
+            # - http=502 (route exists but backend is down)
+            # - other / errors
+            ok = (http_code == 200 and up and route_state == "present") or (http_code == 404 and route_state in ("absent", "block"))
 
             summary_http = http_code if http_code is not None else "ERR"
-            summary = f"site status {'OK' if ok else 'FAIL'} (name={name} up={up} http={summary_http})"
+            summary = f"site status {'OK' if ok else 'FAIL'} (up={up} route={route_state} http={summary_http})"
             if http_code == 502:
                 summary += f" | hint: site: up name={name} confirm=UP_{name.upper().replace('-', '_')}"
+            if http_code == 404 and up and route_state in ("absent", "block"):
+                summary += f" | hint: site: unblock name={name} port=<PORT> confirm=ROUTE_{name.upper().replace('-', '_')}"
 
             http_resp = {
                 "ok": (http_code in (200, 404)),
@@ -1666,13 +1715,15 @@ def main() -> int:
 
             report = {
                 "ok": ok,
-                "exit_code": int(resp.get("exit_code", 0) or 0),
+                "exit_code": 0 if ok else 1,
                 "summary": summary,
                 "results": [
                     {"task": "ssh: run", "params": params, "response": resp},
+                    {"task": "ssh: run", "params": {"action": "caddy_site_route", "mode": "check", "args": {"name": name}}, "response": route_resp},
                     {"task": "http: head", "params": {"url": http_url}, "response": http_resp},
                 ],
             }
+            print(f"[plan] summary: {summary}")
             print(json.dumps(report, ensure_ascii=False))
             raise SystemExit(0)
         except SystemExit:
