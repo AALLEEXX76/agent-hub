@@ -1329,6 +1329,99 @@ def main() -> int:
     # --- /disk quickcheck shortcut
 
 
+    # --- sites group status shortcut (rule-based)
+    if user_task.lower().startswith("monitoring: sites status") or user_task.lower().startswith("monitoring: sites_status"):
+        import os as _os, json as _json, re as _re, subprocess as _sub
+
+        base_url = _os.getenv("N8N_BASE_URL", "https://ii-bot-nout.ru").rstrip("/")
+
+        def _curl_code2(url: str, timeout_s: int = 3) -> int:
+            try:
+                p = _sub.run(
+                    ["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout_s), url],
+                    capture_output=True, text=True
+                )
+                if p.returncode != 0:
+                    return 0
+                t = (p.stdout or "").strip()
+                return int(t) if t.isdigit() else 0
+            except Exception:
+                return 0
+
+        # 1) discover sites from docker_status (containers like: <name>-web-1)
+        r_ds = _call_ssh_action("docker_status", {})
+        ds_text = str(r_ds.get("stdout") or r_ds.get("text") or "")
+
+        sites = []
+        for line in ds_text.splitlines():
+            m = _re.search(r"^([A-Za-z0-9_-]+)-web-1\b", line.strip())
+            if m:
+                sites.append(m.group(1))
+
+        sites = sorted(set(sites))
+
+        results = []
+        up_n = 0
+        blocked_n = 0
+        down_n = 0
+        other_n = 0
+
+        ok = True
+
+        for name in sites:
+            code = _curl_code2(f"{base_url}/{name}/", timeout_s=3)
+            if code == 0:
+                # retry once to reduce false negatives (transient curl errors)
+                code = _curl_code2(f"{base_url}/{name}/", timeout_s=5)
+
+            # optional: route state from caddy_site_route(check)
+            route_state = "unknown"
+            try:
+                rr = _call_ssh_action("caddy_site_route", {"name": name})
+                out = str(rr.get("stdout") or rr.get("text") or "").strip()
+                obj = _parse_json_maybe(out) if out else None
+                if isinstance(obj, dict):
+                    route_state = (obj.get("state") or obj.get("route_state") or obj.get("status") or "unknown")
+            except Exception:
+                route_state = "unknown"
+
+            if code == 200:
+                state = "up"
+                up_n += 1
+            elif code == 404:
+                state = "blocked_or_missing"
+                blocked_n += 1
+            elif code in (502, 0):
+                state = "down"
+                down_n += 1
+                ok = False
+            else:
+                state = "other"
+                other_n += 1
+                ok = False
+
+            results.append({
+                "name": name,
+                "http": int(code),
+                "route": route_state,
+                "state": state,
+            })
+
+        status = "OK" if ok else "FAIL"
+        summary = f"sites status {status} (total={len(sites)} up={up_n} blocked={blocked_n} down={down_n} other={other_n})"
+
+        print(f"[plan] summary: {summary}")
+        print(_json.dumps({
+            "ok": ok,
+            "summary": summary,
+            "base_url": base_url,
+            "sites": results,
+        }, ensure_ascii=False))
+
+        raise SystemExit(0 if ok else 1)
+    # --- /sites group status shortcut
+
+
     # --- Site shortcuts
 
     if user_task.lower().startswith("site: create"):
