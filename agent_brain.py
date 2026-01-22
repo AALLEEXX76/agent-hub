@@ -2203,20 +2203,58 @@ def main() -> int:
 
             port = 0
             if state == "present":
+                # port may be omitted for 'site: unblock' → try autodetect
                 try:
                     port = int(port_raw)
                 except Exception:
                     port = 0
+
+                if port <= 0:
+                    detected = 0
+
+                    # 1) Try docker_status (best effort)
+                    try:
+                        ds_params = {"action": "docker_status", "mode": "check", "args": {}}
+                        ds_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=ds_params)
+                        ds_resp = normalize_exec_response("ssh: run", ds_resp)
+                        out = (ds_resp.get("stdout") or "").splitlines()
+                        # Expect container like: <name>-web-1 ... 127.0.0.1:18080->80/tcp
+                        target = f"{name}-web-1"
+                        for line in out:
+                            if target in line:
+                                mm = __import__("re").search(r"(127\.0\.0\.1:)?(\d+)\-\>", line)
+                                if mm:
+                                    detected = int(mm.group(2))
+                                    break
+                    except Exception:
+                        detected = 0
+
+                    # 2) Try compose_ps for /opt/sites/<name>
+                    if detected <= 0:
+                        try:
+                            cps_params = {"action": "compose_ps", "mode": "check", "args": {"project_dir": f"/opt/sites/{name}"}}
+                            cps_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=cps_params)
+                            cps_resp = normalize_exec_response("ssh: run", cps_resp)
+                            out = (cps_resp.get("stdout") or "").splitlines()
+                            for line in out:
+                                mm = __import__("re").search(r"(127\.0\.0\.1:)?(\d+)\-\>", line)
+                                if mm:
+                                    detected = int(mm.group(2))
+                                    break
+                        except Exception:
+                            detected = 0
+
+                    port = detected
+
                 if port <= 0:
                     report = {
                         "ok": False,
                         "exit_code": 1,
-                        "summary": "site route FAIL (port required for state=present)",
+                        "summary": "site route FAIL (port required for state=present; auto-detect failed)",
                         "results": [],
                     }
                     print(json.dumps(report, ensure_ascii=False))
                     raise SystemExit(1)
-
             mode = "apply" if confirm else "check"
 
             params = {
