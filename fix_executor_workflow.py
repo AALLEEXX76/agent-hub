@@ -24,16 +24,16 @@ def curl_json(method, url, data=None):
     return json.loads(out)
 
 def list_workflows():
-    return curl_json("GET", f"{BASE}/workflows").get("data", [])
+    return curl_json("GET", f"{BASE}/api/v1/workflows").get("data", [])
 
 def create_workflow(body):
-    return curl_json("POST", f"{BASE}/workflows", body)
+    return curl_json("POST", f"{BASE}/api/v1/workflows", body)
 
 def update_workflow(wid, body):
-    return curl_json("PUT", f"{BASE}/workflows/{wid}", body)
+    return curl_json("PUT", f"{BASE}/api/v1/workflows/{wid}", body)
 
 def activate(wid):
-    return curl_json("POST", f"{BASE}/workflows/{wid}/activate")
+    return curl_json("POST", f"{BASE}/api/v1/workflows/{wid}/activate")
 
 wf = {
   "name": WF_NAME,
@@ -65,7 +65,7 @@ const lower = taskRaw.toLowerCase();
 
 const chatId = body.chatId ?? body.telegram?.chatId ?? null;
 
-const allowed = ['docker_status','healthz','backup_now','restart_n8n','caddy_logs'];
+const allowed = ['docker_status','healthz','backup_now','restart_n8n','caddy_logs','sites_list'];
 
 function normalizeAction(t) {
   // formats: "ssh: docker_status" OR "docker_status" OR "/status" etc.

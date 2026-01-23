@@ -1407,6 +1407,20 @@ def main() -> int:
                 "state": state,
             })
 
+        # auto-reactions hints
+        hints = []
+        for it in results:
+            n = str(it.get("name") or "").strip()
+            st = str(it.get("state") or "").strip()
+            if not n:
+                continue
+            if st == "down":
+                up_token = "UP_" + n.upper().replace("-", "_")
+                hints.append(f"hint: recover → site: up name={n} confirm={up_token}  (requires ALLOW_DANGEROUS=1)")
+            if st == "blocked_or_missing":
+                unb_token = "UNBLOCK_" + n.upper().replace("-", "_")
+                hints.append(f"hint: publish → site: unblock name={n} confirm={unb_token}  (requires ALLOW_DANGEROUS=1)")
+
         status = "OK" if ok else "FAIL"
         summary = f"sites status {status} (total={len(sites)} up={up_n} blocked={blocked_n} down={down_n} other={other_n})"
 
@@ -1416,6 +1430,7 @@ def main() -> int:
             "summary": summary,
             "base_url": base_url,
             "sites": results,
+            "hints": hints,
         }, ensure_ascii=False))
 
         raise SystemExit(0 if ok else 1)
@@ -1797,7 +1812,7 @@ def main() -> int:
             if http_code == 502:
                 summary += f" | hint: site: up name={name} confirm=UP_{name.upper().replace('-', '_')}"
             if http_code == 404 and up and route_state in ("absent", "block"):
-                summary += f" | hint: site: unblock name={name} port=<PORT> confirm=ROUTE_{name.upper().replace('-', '_')}"
+                summary += f" | hint: site: unblock name={name} confirm=ROUTE_{name.upper().replace('-', '_')}  (port auto-detect)"
 
             http_resp = {
                 "ok": (http_code in (200, 404)),
