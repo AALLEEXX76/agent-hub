@@ -1407,6 +1407,29 @@ def main() -> int:
                 "state": state,
             })
 
+        # normalize route/state from HTTP
+        for it in results:
+            try:
+                h = int(it.get("http") or 0)
+            except Exception:
+                h = 0
+
+            if h in (200, 502):
+                it["route"] = "present"
+            elif h == 404:
+                it["route"] = "blocked_or_missing"
+            else:
+                it["route"] = "unknown"
+
+            if h == 200:
+                it["state"] = "up"
+            elif h == 502:
+                it["state"] = "down"
+            elif h == 404:
+                it["state"] = "blocked_or_missing"
+            else:
+                it["state"] = it.get("state") or "other"
+
         # auto-reactions hints
         hints = []
         for it in results:
