@@ -857,7 +857,7 @@ def main() -> int:
                 import subprocess
                 try:
                     p = subprocess.run(
-                        ["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout_s), url],
+                        ["curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout_s), url],
                         capture_output=True, text=True
                     )
                     if p.returncode != 0:
@@ -1330,7 +1330,214 @@ def main() -> int:
 
 
     # --- sites group status shortcut (rule-based)
-    if user_task.lower().startswith("monitoring: sites status") or user_task.lower().startswith("monitoring: sites_status"):
+
+    # alias: sites: fix (auto-fix using first hint from sites status)
+    # default = dry-run (no changes). add apply=1 to execute the first suggested fix.
+    if user_task.lower().startswith("sites: fix"):
+        # Examples:
+        #   sites: fix
+        #   sites: fix apply=1   (requires ALLOW_DANGEROUS=1 because it will do apply with confirm)
+        import re as _re
+        from urllib.request import Request as _Req, urlopen as _urlopen
+        from urllib.error import HTTPError as _HTTPError
+
+        try:
+            raw = user_task.strip()
+            parts = raw.split()
+            kv = {}
+            for tok in parts[2:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    kv[k.strip().lower()] = v.strip()
+
+            do_apply = str(kv.get("apply", "0")).strip().lower() in ("1", "true", "yes")
+
+            # --- 1) collect sites via docker_status ---
+            ds_params = {"action": "docker_status", "mode": "check", "args": {}}
+            ds_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=ds_params)
+            ds_resp = normalize_exec_response("ssh: run", ds_resp)
+
+            names = []
+            if ds_resp.get("ok"):
+                for line in str(ds_resp.get("stdout", "")).splitlines():
+                    m = _re.match(r"^([A-Za-z0-9_-]+)-web-1\s", line.strip())
+                    if m:
+                        names.append(m.group(1))
+            names = sorted(set(names))
+
+            base_url = os.environ.get("SITE_BASE_URL") or agent_exec_url.split("/webhook/")[0].rstrip("/")
+            sites = []
+            results = [{"task": "ssh: run", "params": ds_params, "response": ds_resp}]
+            issue_found = False
+
+            for name in names:
+                url = f"{base_url}/{name}/"
+                # HTTP probe (curl is more reliable than urllib for HEAD+TLS)
+                code = 0
+                err = ""
+                try:
+                    sp = __import__("subprocess")
+                    cp = sp.run(
+                        ["curl","-ksS","-o","/dev/null","-w","%{http_code}","--max-time","10", url],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    out = (cp.stdout or "").strip()
+                    if out.isdigit():
+                        code = int(out)
+                    else:
+                        code = 0
+                    if cp.returncode != 0:
+                        err = (cp.stderr or "").strip() or f"curl rc={cp.returncode}"
+                except Exception as e:
+                    err = str(e)
+
+                # infer route/state from HTTP
+                if code in (200, 502):
+                    route = "present"
+                elif code == 404:
+                    route = "blocked_or_missing"
+                else:
+                    route = "unknown"
+
+                if code == 200:
+                    state = "up"
+                elif code == 502:
+                    state = "down"
+                elif code == 404:
+                    state = "blocked_or_missing"
+                else:
+                    state = "other"
+
+                if state != "up":
+                    issue_found = True
+
+                sites.append({"name": name, "http": code, "route": route, "state": state})
+                results.append({"task": "http: head", "params": {"url": url}, "response": {"ok": (code == 200), "url": url, "http_code": code, "error": err}})
+
+            # --- 2) build hints (first one is used for fix) ---
+            hints = []
+            for it in sites:
+                n = str(it.get("name") or "").strip()
+                st = str(it.get("state") or "").strip()
+                if not n:
+                    continue
+                if st == "down":
+                    up_token = "UP_" + n.upper().replace("-", "_")
+                    hints.append(f"hint: recover → site: up name={n} confirm={up_token}")
+                if st == "blocked_or_missing":
+                    unb_token = "ROUTE_" + n.upper().replace("-", "_")
+                    hints.append(f"hint: publish → site: unblock name={n} confirm={unb_token}")
+
+            status = "OK" if not issue_found else "FAIL"
+            summary = f"sites fix {status} (total={len(sites)})"
+
+            # nothing to fix
+            if not issue_found or not hints:
+                report = {"ok": (not issue_found), "exit_code": 0 if not issue_found else 1, "summary": summary, "base_url": base_url, "sites": sites, "hints": hints, "results": results}
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(0 if not issue_found else 1)
+
+            # pick first hint and extract cmd after "→"
+            first_hint = hints[0]
+            cmd = first_hint.split("→", 1)[1].strip() if "→" in first_hint else ""
+            if "(" in cmd:
+                cmd = cmd.split("(", 1)[0].strip()
+
+            if not do_apply:
+                report = {
+                    "ok": False,
+                    "exit_code": 1,
+                    "summary": f"sites fix DRYRUN (would run: {cmd})",
+                    "base_url": base_url,
+                    "sites": sites,
+                    "hints": hints,
+                    "next_cmd": cmd,
+                    "results": results,
+                }
+                print(json.dumps(report, ensure_ascii=False))
+                raise SystemExit(1)
+
+            # --- 3) APPLY first fix ---
+            fix_resp = {"ok": False, "exit_code": 1, "stdout": "", "stderr": "no fix executed"}
+            fix_params = None
+
+            # parse tokens from cmd
+            kv2 = {}
+            for tok in cmd.split()[2:]:
+                if "=" in tok:
+                    k, v = tok.split("=", 1)
+                    kv2[k.strip().lower()] = v.strip()
+            name2 = (kv2.get("name") or "").strip()
+            confirm2 = (kv2.get("confirm") or "").strip()
+
+            if cmd.lower().startswith("site: up") and name2 and confirm2:
+                fix_params = {"action": "compose_up", "mode": "apply", "args": {"project_dir": f"/opt/sites/{name2}"}, "confirm": confirm2}
+                fix_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=fix_params)
+                fix_resp = normalize_exec_response("ssh: run", fix_resp)
+
+            elif cmd.lower().startswith("site: unblock") and name2 and confirm2:
+                # auto-detect port via docker_status
+                detected = 0
+                try:
+                    out = (ds_resp.get("stdout") or "").splitlines()
+                    target = f"{name2}-web-1"
+                    for line in out:
+                        if target in line:
+                            mm = _re.search(r"(127\.0\.0\.1:)?(\d+)\-\>", line)
+                            if mm:
+                                detected = int(mm.group(2))
+                                break
+                except Exception:
+                    detected = 0
+
+                if detected <= 0:
+                    # fallback: compose_ps
+                    try:
+                        cps_params = {"action": "compose_ps", "mode": "check", "args": {"project_dir": f"/opt/sites/{name2}"}}
+                        cps_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=cps_params)
+                        cps_resp = normalize_exec_response("ssh: run", cps_resp)
+                        out2 = (cps_resp.get("stdout") or "").splitlines()
+                        for line in out2:
+                            mm = _re.search(r"(127\.0\.0\.1:)?(\d+)\-\>", line)
+                            if mm:
+                                detected = int(mm.group(2))
+                                break
+                    except Exception:
+                        detected = 0
+
+                if detected > 0:
+                    fix_params = {"action": "caddy_site_route", "mode": "apply", "args": {"name": name2, "state": "present", "port": detected}, "confirm": confirm2}
+                    fix_resp = call_agent_exec(agent_exec_url, "ssh: run", chat_id, params=fix_params)
+                    fix_resp = normalize_exec_response("ssh: run", fix_resp)
+                else:
+                    fix_resp = {"ok": False, "exit_code": 1, "stdout": "", "stderr": "port auto-detect failed for unblock"}
+
+            results.append({"task": "ssh: run", "params": fix_params or {"cmd": cmd}, "response": fix_resp})
+
+            # --- 4) re-check after fix (HEAD again) ---
+            # (simple: reuse existing sites[] but only re-probe the fixed one for correctness)
+            # For now: just return fix result + original status; user can re-run sites: status.
+            ok2 = bool(fix_resp.get("ok", False))
+            report = {
+                "ok": ok2,
+                "exit_code": int(fix_resp.get("exit_code", 0) or 0),
+                "summary": f"sites fix {'OK' if ok2 else 'FAIL'} (ran: {cmd})",
+                "base_url": base_url,
+                "sites": sites,
+                "hints": hints,
+                "results": results,
+            }
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(0 if ok2 else 1)
+
+        except SystemExit:
+            raise
+        except Exception as _ex:
+            report = {"ok": False, "exit_code": 1, "summary": f"sites fix FAIL (exception: {_ex})", "results": []}
+            print(json.dumps(report, ensure_ascii=False))
+            raise SystemExit(1)
+
+    if user_task.lower().startswith("monitoring: sites status") or user_task.lower().startswith("monitoring: sites_status") or user_task.lower().startswith("sites: status") or user_task.lower().startswith("sites:status"):
         import os as _os, json as _json, re as _re, subprocess as _sub
 
         base_url = _os.getenv("N8N_BASE_URL", "https://ii-bot-nout.ru").rstrip("/")
@@ -1338,7 +1545,7 @@ def main() -> int:
         def _curl_code2(url: str, timeout_s: int = 3) -> int:
             try:
                 p = _sub.run(
-                    ["curl", "-fsS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout_s), url],
+                    ["curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", str(timeout_s), url],
                     capture_output=True, text=True
                 )
                 if p.returncode != 0:
