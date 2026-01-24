@@ -18,3 +18,6 @@ workflows/
 
 # local backups
 local_backups/
+
+# local workflow drafts
+workflow_agent_executor*.put.json
