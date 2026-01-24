@@ -1162,7 +1162,7 @@ def main() -> int:
 
         print(f"[monitoring] shortcut failed: {_ex}")
 
-        # --- n8n status shortcut (rule-based)
+    # --- n8n status shortcut (rule-based)
     if user_task.lower().startswith("monitoring: n8n status"):
         import os as _os, json
         import httpx
