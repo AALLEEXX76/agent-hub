@@ -12,7 +12,6 @@ artifacts/
 *.bak_*
 
 # local server snapshots (do not commit)
-snapshots/
 
 workflows/
 
@@ -23,4 +22,12 @@ local_backups/
 workflow_agent_executor*.put.json
 
 # keep snapshots index tracked (archives stay local)
+
+# keep snapshots index tracked (archives stay local)
+snapshots/*.tgz
+snapshots/*.tgz.sha256
+snapshots/*.sha256
+
+# keep snapshots index tracked (archives stay local)
+snapshots/*
 !snapshots/INDEX.txt
