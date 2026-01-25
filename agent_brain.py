@@ -1318,12 +1318,54 @@ def main() -> int:
 
     # --- disk quickcheck shortcut (rule-based)
     if user_task.lower().startswith("monitoring: disk quickcheck"):
+        import os as _os
+        import subprocess as _subprocess
+
         params = {"action": "disk_quickcheck", "mode": "check", "args": {}}
-        r = call_agent_exec(agent_exec_url, "ssh: run", chat_id, timeout_s=30, params=params)
+
+        # 1) Try via webhook (n8n gateway)
+        _aeu = _os.environ.get("AGENT_EXEC_URL", "https://ii-bot-nout.ru/webhook/agent-exec")
+        r = call_agent_exec(_aeu, "ssh: run", chat_id, timeout_s=30, params=params)
+        r = normalize_exec_response("ssh: run", r)
+
+        txt = str(r.get("text") or r.get("stdout") or "").strip()
         ok = bool(r.get("ok", False))
+
+        # 2) If gateway says "Не понял команду" → fallback directly to Hand v2 over SSH
+        fb = None
+        if (not ok) and ("Не понял команду" in txt):
+            try:
+                host = _os.environ.get("HANDV2_SSH_HOST", "ii-bot-nout")
+                payload = {"task": "ssh: run", "params": params}
+                proc = _subprocess.run(
+                    ["ssh", host, "/usr/local/sbin/iibotv2"],
+                    input=(json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"),
+                    capture_output=True,
+                    timeout=30,
+                )
+                out_s = (proc.stdout or b"").decode("utf-8", errors="replace").strip()
+                try:
+                    fb = json.loads(out_s) if out_s else {"ok": False, "stderr": "empty stdout from iibotv2"}
+                except Exception:
+                    fb = {"ok": False, "stderr": "non-json stdout from iibotv2", "stdout": out_s}
+                fb = normalize_exec_response("ssh: run", fb)
+                if fb.get("ok"):
+                    r = fb
+                    ok = True
+            except Exception as _ex:
+                fb = {"ok": False, "stderr": f"ssh fallback failed: {_ex}"}
+
         summary = "disk quickcheck OK" if ok else "disk quickcheck FAIL"
         print(f"[plan] summary: {summary}")
-        out = {"ok": ok, "summary": summary, "brain_report": r}
+
+        out = {
+            "ok": ok,
+            "summary": summary,
+            "brain_report": {
+                "final": r,
+                "ssh_fallback": fb,
+            },
+        }
         print(json.dumps(out, ensure_ascii=False))
         return
     # --- /disk quickcheck shortcut
