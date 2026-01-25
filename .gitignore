@@ -21,3 +21,6 @@ local_backups/
 
 # local workflow drafts
 workflow_agent_executor*.put.json
+
+# keep snapshots index tracked (archives stay local)
+!snapshots/INDEX.txt
