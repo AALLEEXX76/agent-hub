@@ -2516,7 +2516,7 @@ def main() -> int:
 
             name = (kv.get("name") or "").strip()
             port_raw = (kv.get("port") or "").strip()
-            state = (kv.get("state") or "present").strip().lowerlower() if False else (kv.get("state") or "present").strip().lower()
+            state = (kv.get("state") or "present").strip().lower()
             confirm = (kv.get("confirm") or "").strip()
 
             if not name:
