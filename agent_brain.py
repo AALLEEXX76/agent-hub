@@ -822,6 +822,153 @@ def main() -> int:
 
     
 
+                # monitoring: all status -> server + sites + n8n + disk (one-shot)
+        if _tl.startswith("monitoring:") and ("all status" in _tl or "all_status" in _tl):
+            import json as _json, re as _re, subprocess
+
+            def _curl_code(url: str, timeout_s: int = 4) -> int:
+                try:
+                    p = subprocess.run(
+                        ["curl","-ksS","-o","/dev/null","-w","%{http_code}","--max-time",str(timeout_s),url],
+                        capture_output=True, text=True
+                    )
+                    if p.returncode != 0:
+                        return 0
+                    t = (p.stdout or "").strip()
+                    return int(t) if t.isdigit() else 0
+                except Exception:
+                    return 0
+
+            base_url = os.environ.get("N8N_BASE_URL", "https://ii-bot-nout.ru").rstrip("/")
+
+            # --- server status bits ---
+            r_docker = _call_ssh_action("docker_status", {})
+            r_health = _call_ssh_action("healthz", {})
+            r_caddy  = _call_ssh_action("caddy_logs", {"since_seconds": 300, "tail": 200, "only_errors": True})
+
+            health_obj = _parse_json_maybe(str(r_health.get("stdout") or r_health.get("text") or "").strip()) or {}
+            health_ok = bool(r_health.get("ok")) and (health_obj.get("status") == "ok")
+            docker_ok = bool(r_docker.get("ok"))
+
+            caddy_text = str(r_caddy.get("stdout") or r_caddy.get("text") or "")
+            caddy_errs = caddy_text.count('\"level\":\"error\"') + caddy_text.count('"level":"error"')
+
+            code_root = _curl_code(f"{base_url}/")
+            code_healthz = _curl_code(f"{base_url}/healthz")
+            http_ok = (code_root == 200 and code_healthz == 200)
+
+            server_ok = bool(docker_ok and health_ok and http_ok and (caddy_errs == 0))
+
+            # --- sites status bits ---
+            docker_out = str(r_docker.get("stdout") or r_docker.get("text") or "")
+            site_names = []
+            site_up_map = {}
+            for line in docker_out.splitlines():
+                m = _re.match(r"^([A-Za-z0-9_-]+)-web-1\s+(.*)$", line.strip())
+                if not m:
+                    continue
+                n = m.group(1)
+                site_names.append(n)
+                site_up_map[n] = (" up " in (" " + m.group(2).lower() + " "))
+
+            sites = []
+            up = blocked = down = other = 0
+            for n in sorted(set(site_names)):
+                code = _curl_code(f"{base_url}/{n}/")
+                st_up = bool(site_up_map.get(n, False))
+                if st_up and code == 200:
+                    state = "up"; up += 1
+                elif st_up and code == 404:
+                    state = "blocked"; blocked += 1
+                elif (not st_up) or code in (0, 502, 503, 504):
+                    state = "down"; down += 1
+                else:
+                    state = "other"; other += 1
+
+                sites.append({"name": n, "http": int(code), "state": state})
+
+            total = len(sites)
+            sites_ok = (down == 0 and other == 0)
+
+            # --- n8n status bits ---
+            n8n_up = ("n8n-n8n-1" in docker_out) and ("n8n-n8n-1" in docker_out and (" up " in docker_out.lower()))
+            n8n_ok = bool(http_ok and n8n_up and (caddy_errs == 0))
+
+            # --- disk quickcheck ---
+            r_disk = _call_ssh_action("disk_quickcheck", {})
+
+            # if webhook doesn't know disk_quickcheck, fallback via SSH directly to Hand v2
+            try:
+                _t = str(r_disk.get("text") or r_disk.get("stdout") or "")
+                if (not r_disk.get("ok")) and ("Не понял команду" in _t or not r_disk.get("request_id")):
+                    payload = _json.dumps({"task":"ssh: run","params":{"action":"disk_quickcheck","mode":"check","args":{}}}, ensure_ascii=False)
+                    p2 = subprocess.run(
+                        ["ssh","ii-bot-nout","/usr/local/sbin/iibotv2"],
+                        input=payload,
+                        text=True,
+                        capture_output=True,
+                        timeout=30
+                    )
+                    if p2.returncode == 0 and (p2.stdout or "").strip():
+                        # take last line in case ssh prints noise
+                        last = (p2.stdout or "").strip().splitlines()[-1]
+                        r2 = _json.loads(last)
+                        r_disk = normalize_exec_response("ssh: run", r2)
+            except Exception:
+                pass
+
+            disk_ok = bool(r_disk.get("ok"))
+
+            ok_all = bool(server_ok and sites_ok and n8n_ok and disk_ok)
+            status = "OK" if ok_all else "FAIL"
+
+            summary = f"all status {status} (sites total={total} up={up} blocked={blocked} down={down} other={other})"
+            print(f"[plan] summary: {summary}")
+
+            out = {
+                "ok": ok_all,
+                "status": status,
+                "summary": summary,
+                "server": {
+                    "ok": server_ok,
+                    "root_http": int(code_root),
+                    "healthz_http": int(code_healthz),
+                    "health_ok": bool(health_ok),
+                    "docker_ok": bool(docker_ok),
+                    "caddy_errors_5m": int(caddy_errs),
+                    "request_ids": {
+                        "docker_status": r_docker.get("request_id"),
+                        "healthz": r_health.get("request_id"),
+                        "caddy_logs": r_caddy.get("request_id"),
+                    },
+                },
+                "sites": {
+                    "ok": sites_ok,
+                    "total": int(total),
+                    "up": int(up),
+                    "blocked": int(blocked),
+                    "down": int(down),
+                    "other": int(other),
+                    "items": sites,
+                },
+                "n8n": {
+                    "ok": n8n_ok,
+                    "n8n_up": bool(n8n_up),
+                    "root_http": int(code_root),
+                    "healthz_http": int(code_healthz),
+                    "caddy_errors_5m": int(caddy_errs),
+                },
+                "disk": {
+                    "ok": disk_ok,
+                    "request_id": r_disk.get("request_id"),
+                    "text": r_disk.get("text") or r_disk.get("stdout") or "",
+                },
+            }
+            print(_json.dumps(out, ensure_ascii=False))
+            raise SystemExit(0 if ok_all else 1)
+
+
+
         # monitoring: server status -> docker_status + healthz + caddy_logs (tail 30)
 
         if _tl.startswith("monitoring:") and ("server status" in _tl or "server_status" in _tl):
