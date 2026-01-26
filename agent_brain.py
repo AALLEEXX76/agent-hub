@@ -1752,7 +1752,19 @@ def main() -> int:
         for line in ds_text.splitlines():
             m = _re.search(r"^([A-Za-z0-9_-]+)-web-1\b", line.strip())
             if m:
-                sites.append(m.group(1))
+                sites.append(m.group(1))        # 1b) also discover sites from /opt/sites that actually have docker-compose.yml
+        try:
+            p_find = _sub.run(
+                ["ssh", "-o", "BatchMode=yes", "ii-bot-nout", "bash", "-lc", "find /opt/sites -maxdepth 2 -mindepth 2 -name docker-compose.yml -printf '%f\n'"],
+                capture_output=True, text=True
+            )
+            if p_find.returncode == 0:
+                for nm in (p_find.stdout or "").splitlines():
+                    nm = (nm or "").strip()
+                    if nm and _re.match(r"^[A-Za-z0-9_-]+$", nm):
+                        sites.append(nm)
+        except Exception:
+            pass
 
         sites = sorted(set(sites))
 
