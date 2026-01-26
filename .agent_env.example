@@ -1,0 +1,21 @@
+# Example env (SAFE to commit). Copy to .agent_env and fill secrets locally.
+
+# Base URL of your server (used for HTTP probes + default paths)
+N8N_BASE_URL=https://ii-bot-nout.ru
+
+# n8n webhook Agent Executor
+AGENT_EXEC_URL=https://ii-bot-nout.ru/webhook/agent-exec
+
+# Hand v2 SSH fallback (recovery/self-ops)
+HANDV2_SSH_HOST=ii-bot-nout
+HANDV2_SSH_CMD=/usr/local/sbin/iibotv2
+
+# Allowlisted actions for SSH fallback when webhook is unavailable/broken
+RECOVERY_SSH_ACTIONS=compose_up,compose_restart,compose_ps,compose_logs,docker_status,healthz,caddy_logs,disk_quickcheck,list_actions
+
+# n8n Public API (leave empty here; fill in .agent_env locally)
+N8N_API_KEY=
+
+# Safety gates (default OFF)
+N8N_ALLOW_WRITE=0
+ALLOW_DANGEROUS=0
