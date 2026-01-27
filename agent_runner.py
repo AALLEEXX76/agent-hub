@@ -346,7 +346,7 @@ def main() -> int:
     # post-apply healthcheck (optional): server / webhook:list_actions / audit for that list_actions
     if did_apply and os.environ.get("DISABLE_POST_APPLY_HEALTHCHECK") != "1":
         # if this was a queued self-op (qid -> rid), give services a moment to come back
-        if report.get("qid_to_rid", {}).get("ok") and str(report.get("apply_request_id","")).startswith("q_"):
+        if str(report.get("apply_request_id","")).startswith(("q_","rq_sshfb_")):
             import time
             time.sleep(15)
     report["post_apply_healthcheck"] = _run_remote_healthcheck()
