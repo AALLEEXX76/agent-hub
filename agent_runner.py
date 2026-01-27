@@ -209,6 +209,90 @@ def _run_remote_healthcheck() -> Dict[str, Any]:
         "stderr": p.stderr,
     }
 
+# --- qid->rid support (auto) ---
+def _find_request_id_anywhere(obj: Any) -> Optional[str]:
+    """
+    Recursively scan a dict/list for something that looks like request_id.
+    Prefer q_* or rq_*.
+    """
+    best: Optional[str] = None
+
+    def consider(v: str):
+        nonlocal best
+        if not isinstance(v, str):
+            return
+        if v.startswith(("q_", "rq_")):
+            # prefer q_/rq_ over anything else
+            if best is None:
+                best = v
+            else:
+                # keep the "more specific" one (rq_ > q_)
+                if best.startswith("q_") and v.startswith("rq_"):
+                    best = v
+
+    def walk(x: Any):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if isinstance(k, str) and k == "request_id" and isinstance(v, str):
+                    consider(v)
+                walk(v)
+        elif isinstance(x, list):
+            for it in x:
+                walk(it)
+        elif isinstance(x, str):
+            consider(x)
+
+    walk(obj)
+    return best
+
+
+def _qid_to_rid(qid: str) -> Dict[str, Any]:
+    """
+    q_<...> -> rq_<...> by reading /tmp/iibot_<qid>.log on server (via tools/qid_to_rid.sh).
+    """
+    script = Path(__file__).resolve().parent / "tools" / "qid_to_rid.sh"
+    try:
+        p = subprocess.run(
+            ["bash", str(script), qid],
+            capture_output=True,
+            text=True,
+            env=_get_child_env(),
+        )
+        rid = (p.stdout or "").strip()
+        ok = (p.returncode == 0) and rid.startswith("rq_")
+        return {
+            "ok": ok,
+            "exit_code": p.returncode,
+            "qid": qid,
+            "rid": rid,
+            "stdout": p.stdout,
+            "stderr": p.stderr,
+        }
+    except Exception as e:
+        return {"ok": False, "exit_code": 1, "qid": qid, "rid": "", "stdout": "", "stderr": str(e)}
+
+
+def _audit_match_rid(rid: str) -> Dict[str, Any]:
+    """
+    Grep audit.jsonl on server for rid (best-effort).
+    """
+    if not rid:
+        return {"ok": False, "exit_code": 2, "rid": rid, "stdout": "", "stderr": "empty rid"}
+
+    cmd = [
+        "ssh", "ii-bot-nout",
+        f"set -euo pipefail; tail -n 2000 /var/log/iibot/audit.jsonl | grep -nF '{rid}' | tail -n 5 || true"
+    ]
+    p = subprocess.run(cmd, capture_output=True, text=True, env=_get_child_env())
+    out = (p.stdout or "").strip()
+    return {
+        "ok": bool(out),
+        "exit_code": p.returncode,
+        "rid": rid,
+        "stdout": p.stdout,
+        "stderr": p.stderr,
+    }
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="agent_runner v1.1 (CLI wrapper over agent_brain.py)")
@@ -239,11 +323,33 @@ def main() -> int:
         "brain": brain,
         "brain_report": brain_report,
     }
+    # post-apply: resolve qid->rid (for queued self-ops) and match audit
+    did_apply = brain.get("ok") and _detect_apply(task_text, brain_report)
 
-    # post-apply healthcheck (optional)
-    # runs only after successful APPLY-like tasks (mode=apply / confirm=...)
-    if brain.get("ok") and _detect_apply(task_text, brain_report) and os.environ.get("DISABLE_POST_APPLY_HEALTHCHECK") != "1":
-        report["post_apply_healthcheck"] = _run_remote_healthcheck()
+    if did_apply:
+        rid0 = _find_request_id_anywhere(brain_report) if isinstance(brain_report, dict) else None
+        if rid0:
+            report["apply_request_id"] = rid0
+
+            # queued self-op: webhook returns q_..., real rid is inside /tmp log
+            if rid0.startswith("q_"):
+                qres = _qid_to_rid(rid0)
+                report["qid_to_rid"] = qres
+                real_rid = qres.get("rid") if qres.get("ok") else ""
+                if real_rid:
+                    report["apply_real_request_id"] = real_rid
+                    report["apply_audit_match"] = _audit_match_rid(real_rid)
+            elif rid0.startswith("rq_"):
+                report["apply_real_request_id"] = rid0
+                report["apply_audit_match"] = _audit_match_rid(rid0)
+
+    # post-apply healthcheck (optional): server / webhook:list_actions / audit for that list_actions
+    if did_apply and os.environ.get("DISABLE_POST_APPLY_HEALTHCHECK") != "1":
+        # if this was a queued self-op (qid -> rid), give services a moment to come back
+        if report.get("qid_to_rid", {}).get("ok") and str(report.get("apply_request_id","")).startswith("q_"):
+            import time
+            time.sleep(15)
+    report["post_apply_healthcheck"] = _run_remote_healthcheck()
 
     report_path = write_report(report)
 
