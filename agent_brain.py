@@ -1438,6 +1438,46 @@ def main() -> int:
         return
     # --- /n8n restart shortcut
 
+
+    # --- recovery: n8n restart shortcut (FORCE SSH fallback)
+    if user_task.lower().startswith("recovery: n8n restart"):
+
+        # parse confirm=TOKEN (required for apply)
+        confirm = ""
+        try:
+            parts = user_task.split()
+            for p2 in parts:
+                if p2.startswith("confirm="):
+                    confirm = p2.split("=", 1)[1].strip()
+        except Exception:
+            confirm = ""
+
+        mode = "apply" if confirm else "check"
+
+        params = {
+            "action": "compose_restart",
+            "mode": mode,
+            "args": {"project_dir": "/opt/n8n"},
+        }
+        if confirm:
+            params["confirm"] = confirm
+
+        # force out-of-band path (works even if webhook is down)
+        r = _call_handv2_via_ssh(params, timeout_s=180)
+        ok = bool(r.get("ok"))
+
+        if mode == "check" and (not ok):
+            summary = "recovery n8n restart CHECK blocked (need confirm)"
+        else:
+            summary = "recovery n8n restart OK" if ok else "recovery n8n restart FAIL"
+
+        print(f"[plan] summary: {summary} (mode={mode})")
+
+        out = {"ok": ok, "summary": summary, "brain_report": {"mode": mode, "confirm_set": bool(confirm), "forced_fallback": "ssh", "result": r}}
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /recovery n8n restart shortcut
+
     # --- postgres status shortcut (rule-based)
     if user_task.lower().startswith("monitoring: postgres status"):
 
