@@ -1538,6 +1538,127 @@ def main() -> int:
         return
     # --- /recovery n8n restart shortcut
 
+    # --- recovery: all fix shortcut (safe-ish fixer: sites unblock + n8n restart via forced SSH fallback)
+    if user_task.lower().startswith("recovery: all fix"):
+
+        import subprocess, sys as _sys, json as _json
+
+        def _last_json(stdout: str) -> dict:
+            s = (stdout or "").strip()
+            if not s:
+                return {}
+            last = s.splitlines()[-1].strip()
+            try:
+                return _json.loads(last)
+            except Exception:
+                return {}
+
+        def _run_self(task_text: str, timeout_s: int = 300) -> dict:
+            p2 = subprocess.run(
+                [_sys.executable, str(Path(__file__)), task_text],
+                capture_output=True, text=True, timeout=timeout_s
+            )
+            return _last_json(p2.stdout)
+
+        tl = user_task.lower()
+        apply = ("apply=1" in tl) or ("apply:true" in tl) or ("apply=yes" in tl)
+
+        # optional confirm=TOKEN for n8n restart apply
+        confirm = ""
+        try:
+            for p2 in user_task.split():
+                if p2.startswith("confirm="):
+                    confirm = p2.split("=", 1)[1].strip()
+        except Exception:
+            confirm = ""
+
+        # 1) initial status
+        st1 = _run_self("monitoring: all status", timeout_s=120)
+        ok1 = bool(st1.get("ok"))
+
+        actions = []
+        notes = []
+
+        if ok1 and (not apply):
+            summary = "recovery all fix DRYRUN → nothing to fix | then all status OK"
+            print(f"[plan] summary: {summary}")
+            out = {"ok": True, "summary": summary, "brain_report": {"apply": False, "actions": actions, "status_before": st1}}
+            print(json.dumps(out, ensure_ascii=False))
+            return
+
+        # parse bits
+        sites = st1.get("sites") if isinstance(st1.get("sites"), dict) else {}
+        n8n   = st1.get("n8n")   if isinstance(st1.get("n8n"), dict)   else {}
+
+        blocked = int(sites.get("blocked", 0) or 0) if isinstance(sites, dict) else 0
+        n8n_ok  = bool(n8n.get("ok")) if isinstance(n8n, dict) else True
+
+        # 2) DRYRUN: print what we would do
+        if (not apply):
+            if blocked > 0:
+                actions.append("would run: sites: fix apply=1 (needs ALLOW_DANGEROUS=1)")
+            if not n8n_ok:
+                if confirm:
+                    actions.append(f"would run: recovery: n8n restart confirm={confirm} (forced SSH fallback; needs ALLOW_DANGEROUS=1)")
+                else:
+                    actions.append("would run: recovery: n8n restart confirm=TOKEN (forced SSH fallback; needs ALLOW_DANGEROUS=1)")
+            summary = "recovery all fix DRYRUN → " + ("; ".join(actions) if actions else "nothing to fix") + f" | then all status {'OK' if ok1 else 'FAIL'}"
+            print(f"[plan] summary: {summary}")
+            out = {"ok": ok1, "summary": summary, "brain_report": {"apply": False, "actions": actions, "status_before": st1}}
+            print(json.dumps(out, ensure_ascii=False))
+            return
+
+        # 3) APPLY requires ALLOW_DANGEROUS=1
+        if os.environ.get("ALLOW_DANGEROUS") != "1":
+            summary = "recovery all fix BLOCKED (need ALLOW_DANGEROUS=1 for apply=1)"
+            print(f"[plan] summary: {summary}")
+            out = {"ok": False, "summary": summary, "brain_report": {"apply": True, "blocked": True, "actions": actions, "status_before": st1}}
+            print(json.dumps(out, ensure_ascii=False))
+            return
+
+        # 4) APPLY: sites fix (unblock) if needed
+        sites_obj = {}
+        if blocked > 0:
+            sites_obj = _run_self("sites: fix apply=1", timeout_s=300)
+            actions.append("ran: sites: fix apply=1")
+
+        # 5) APPLY: n8n restart (forced ssh fallback) if needed and confirm provided
+        n8n_obj = {}
+        if (not n8n_ok):
+            if not confirm:
+                notes.append("n8n not ok: missing confirm=TOKEN → skipped restart")
+            else:
+                # call forced ssh fallback directly
+                params = {"action": "compose_restart", "mode": "apply", "args": {"project_dir": "/opt/n8n"}, "confirm": confirm}
+                r = _call_handv2_via_ssh(params, timeout_s=180)
+                n8n_obj = {"ok": bool(r.get("ok")), "result": r}
+                actions.append(f"ran: recovery: n8n restart confirm={confirm} (forced ssh)")
+
+        # 6) final status
+        st2 = _run_self("monitoring: all status", timeout_s=120)
+        ok2 = bool(st2.get("ok"))
+
+        summary = "recovery all fix APPLY → " + ("; ".join(actions) if actions else "nothing to do") + f" | then all status {'OK' if ok2 else 'FAIL'}"
+        print(f"[plan] summary: {summary}")
+        out = {
+            "ok": ok2,
+            "summary": summary,
+            "brain_report": {
+                "apply": True,
+                "actions": actions,
+                "notes": notes,
+                "status_before": st1,
+                "sites_fix": sites_obj,
+                "n8n_restart": n8n_obj,
+                "status_after": st2,
+            },
+        }
+        print(json.dumps(out, ensure_ascii=False))
+        return
+    # --- /recovery: all fix shortcut
+
+
+
     # --- postgres status shortcut (rule-based)
     if user_task.lower().startswith("monitoring: postgres status"):
 
