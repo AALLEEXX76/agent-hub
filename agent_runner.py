@@ -324,12 +324,30 @@ def main() -> int:
             _s2 = _inner.get('summary') if isinstance(_inner, dict) else None
             if isinstance(_s2, str) and _s2.strip():
                 summary = _s2.strip()
+
+    # prefer ok/exit_code from structured brain_report when present
+
+    ok_final = bool(brain.get('ok', False))
+
+    exit_code_final = int(brain.get('exit_code', 0) or 0)
+
+    if isinstance(brain_report, dict):
+
+        _ok = brain_report.get('ok')
+
+        if isinstance(_ok, bool):
+
+            ok_final = _ok
+
+            if (not ok_final) and exit_code_final == 0:
+
+                exit_code_final = 1
     report = {
         "task": task_text,
         "ts_utc": datetime.now(timezone.utc).isoformat(),
         "summary": summary,
-        "ok": brain["ok"],
-        "exit_code": brain["exit_code"],
+        "ok": ok_final,
+        "exit_code": exit_code_final,
         "brain": brain,
         "brain_report": brain_report,
     }
@@ -364,10 +382,10 @@ def main() -> int:
     report_path = write_report(report)
 
     out = {
-        "ok": brain["ok"],
+        "ok": ok_final,
         "summary": summary,
         "report": str(report_path),
-        "exit_code": brain["exit_code"],
+        "exit_code": exit_code_final,
     }
 
     if args.json:
