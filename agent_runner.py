@@ -314,6 +314,16 @@ def main() -> int:
     brain_report = extract_brain_report(brain.get("stdout", ""))
     summary = short_summary(brain.get("stdout",""), brain.get("stderr",""), ok=brain.get("ok", True), exit_code=int(brain.get("exit_code", 0) or 0))
 
+    # prefer summary from structured brain_report when present
+    if isinstance(brain_report, dict):
+        _s = brain_report.get('summary')
+        if isinstance(_s, str) and _s.strip():
+            summary = _s.strip()
+        else:
+            _inner = brain_report.get('brain_report')
+            _s2 = _inner.get('summary') if isinstance(_inner, dict) else None
+            if isinstance(_s2, str) and _s2.strip():
+                summary = _s2.strip()
     report = {
         "task": task_text,
         "ts_utc": datetime.now(timezone.utc).isoformat(),
