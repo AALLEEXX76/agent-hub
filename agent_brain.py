@@ -969,6 +969,66 @@ def main() -> int:
 
 
 
+
+        # monitoring: all fix -> run sites: fix (dryrun/apply) then re-check all status (rule-based, no LLM)
+        if _tl.startswith("monitoring:") and ("all fix" in _tl or "all_fix" in _tl):
+            import json as _json, subprocess, sys as _sys
+
+            apply = ("apply=1" in _tl) or ("apply:true" in _tl) or ("apply=yes" in _tl)
+
+            def _last_json(stdout: str) -> dict:
+                s = (stdout or "").strip()
+                if not s:
+                    return {}
+                last = s.splitlines()[-1].strip()
+                try:
+                    return _json.loads(last)
+                except Exception:
+                    return {}
+
+            # 1) sites: fix (dryrun or apply=1) via self-subprocess (reuses existing shortcut logic)
+            if apply and os.environ.get("ALLOW_DANGEROUS") != "1":
+                out = {
+                    "ok": False,
+                    "status": "BLOCKED",
+                    "summary": "all fix BLOCKED (need ALLOW_DANGEROUS=1 for apply=1)",
+                }
+                print(_json.dumps(out, ensure_ascii=False))
+                raise SystemExit(1)
+
+            sites_cmd = "sites: fix apply=1" if apply else "sites: fix"
+            p1 = subprocess.run(
+                [_sys.executable, str(Path(__file__)), sites_cmd],
+                capture_output=True, text=True, timeout=300
+            )
+            sites_obj = _last_json(p1.stdout)
+
+            # 2) re-check monitoring: all status
+            p2 = subprocess.run(
+                [_sys.executable, str(Path(__file__)), "monitoring: all status"],
+                capture_output=True, text=True, timeout=300
+            )
+            st_obj = _last_json(p2.stdout)
+
+            ok_all = bool(st_obj.get("ok"))
+            status = "OK" if ok_all else "FAIL"
+
+            s_sites = str(sites_obj.get("summary") or "").strip()
+            s_stat  = str(st_obj.get("summary") or "").strip()
+            mode    = "APPLY" if apply else "DRYRUN"
+            summary = f"all fix {mode} → {s_sites} | then {s_stat}".strip()
+
+            print(f"[plan] summary: {summary}")
+            out = {
+                "ok": ok_all,
+                "status": status,
+                "summary": summary,
+                "sites_fix": sites_obj,
+                "all_status": st_obj,
+            }
+            print(_json.dumps(out, ensure_ascii=False))
+            raise SystemExit(0 if ok_all else 1)
+
         # monitoring: server status -> docker_status + healthz + caddy_logs (tail 30)
 
         if _tl.startswith("monitoring:") and ("server status" in _tl or "server_status" in _tl):
