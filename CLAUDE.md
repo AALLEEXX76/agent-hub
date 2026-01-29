@@ -13,7 +13,7 @@
 
 ## Change management
 - All infra changes must be tracked in git:
-  - edit files -> show diff -> commit with message -> only then apply.
+  - edit files -show diff -commit with message -only then apply.
 - Use small steps and checkpoints.
 - If unsure, stop and ask for the next instruction.
 
@@ -37,3 +37,9 @@ Before running commands on a server, always:
 - identify which host (STAGING/PROD)
 Then run and report results.
 
+
+## E2E tests (Brain + Runner)
+Док: `docs/e2e_tests.md`
+
+Быстрый прогон:
+- `./tools/test_e2e.sh`
