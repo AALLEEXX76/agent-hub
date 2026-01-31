@@ -43,3 +43,7 @@ Then run and report results.
 
 Быстрый прогон:
 - `./tools/test_e2e.sh`
+
+## Monitoring Playbook (MVP)
+Док: `docs/monitoring_playbook.md`
+
