@@ -47,3 +47,7 @@ Then run and report results.
 ## Monitoring Playbook (MVP)
 Док: `docs/monitoring_playbook.md`
 
+
+## Recovery / Self-Ops Playbook (MVP)
+Док: `docs/recovery_playbook.md`
+
