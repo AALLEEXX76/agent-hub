@@ -395,7 +395,7 @@ def main() -> int:
         print(summary)
         print(f"report: {report_path}")
 
-    return 0 if brain["ok"] else 1
+    return int(exit_code_final)
 
 
 if __name__ == "__main__":
