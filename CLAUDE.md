@@ -51,3 +51,6 @@ Then run and report results.
 ## Recovery / Self-Ops Playbook (MVP)
 Док: `docs/recovery_playbook.md`
 
+
+## n8n Playbook (MVP)
+Док: `docs/n8n_playbook.md`
