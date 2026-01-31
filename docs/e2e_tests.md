@@ -23,3 +23,7 @@ E2E = end-to-end: проверяем, что Brain + Runner + Hand v2 реаль
 
 ## Гейты
 - recovery: all fix apply=1 без ALLOW_DANGEROUS=1 → BLOCKED + exit_code=1 (это ожидаемо).
+
+## Exit codes
+- `./agent_runner.py --json ...` теперь выходит с `exit_code` из `brain_report` (например, BLOCKED → rc=1).
+- `./tools/test_e2e.sh` в целом должен завершаться с rc=0 (даже если внутри есть ожидаемый BLOCKED-тест).
