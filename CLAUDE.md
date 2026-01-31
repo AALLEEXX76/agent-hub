@@ -54,3 +54,6 @@ Then run and report results.
 
 ## n8n Playbook (MVP)
 Док: `docs/n8n_playbook.md`
+
+## VPN Playbook (MVP)
+Док: `docs/vpn_playbook.md`
