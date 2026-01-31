@@ -57,3 +57,6 @@ Then run and report results.
 
 ## VPN Playbook (MVP)
 Док: `docs/vpn_playbook.md`
+
+## Playbooks Framework (MVP)
+Док: `docs/playbooks_framework.md`
