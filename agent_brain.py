@@ -1976,7 +1976,7 @@ def main() -> int:
                 sites.append(m.group(1))        # 1b) also discover sites from /opt/sites that actually have docker-compose.yml
         try:
             p_find = _sub.run(
-                ["ssh", "-o", "BatchMode=yes", "ii-bot-nout", "bash", "-lc", "find /opt/sites -maxdepth 2 -mindepth 2 -name docker-compose.yml -printf '%f\n'"],
+                ["ssh", "-o", "BatchMode=yes", "ii-bot-nout", "bash", "-lc", "find /opt/sites -maxdepth 2 -mindepth 2 -name docker-compose.yml -printf '%h\n' | xargs -n1 basename"],
                 capture_output=True, text=True
             )
             if p_find.returncode == 0:
