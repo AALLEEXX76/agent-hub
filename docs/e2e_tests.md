@@ -27,3 +27,10 @@ E2E = end-to-end: проверяем, что Brain + Runner + Hand v2 реаль
 ## Exit codes
 - `./agent_runner.py --json ...` теперь выходит с `exit_code` из `brain_report` (например, BLOCKED → rc=1).
 - `./tools/test_e2e.sh` в целом должен завершаться с rc=0 (даже если внутри есть ожидаемый BLOCKED-тест).
+
+## Extra: n8n workflow SHA guard
+
+Проверяем, что workflow `XC7hfkwDAPoa2t9L` не изменился (dry-run SHA256):
+
+- `tools/test_n8n_sha_guard.sh` — делает `n8n: workflows_get_dryrun` и сравнивает sha256 с ожидаемым.
+- Этот тест включён в общий прогон `tools/test_e2e.sh`.
