@@ -12,4 +12,7 @@ echo "[extra] n8n sha guard (expect OK)"
 echo "[extra] monitoring: sites status (expect OK)"
 ./agent_runner.py --json 'monitoring: sites status'
 
+echo "[extra] monitoring shortcuts (expect OK)"
+./tools/test_monitoring_shortcuts.sh
+
 echo "OK: all e2e tests passed"
