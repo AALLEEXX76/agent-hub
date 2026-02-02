@@ -7,3 +7,7 @@ env -u ALLOW_DANGEROUS ./tools/test_recovery_all_fix.sh
 env -u ALLOW_DANGEROUS ./tools/test_recovery_n8n_restart.sh
 
 echo "OK: all e2e tests passed"
+
+echo "[extra] monitoring: sites status (expect OK)"
+./agent_runner.py --json 'monitoring: sites status'
+
