@@ -15,4 +15,7 @@ echo "[extra] monitoring: sites status (expect OK)"
 echo "[extra] monitoring shortcuts (expect OK)"
 ./tools/test_monitoring_shortcuts.sh
 
+echo "[extra] monitoring: all fix apply=1 (expect OK)"
+./tools/test_monitoring_all_fix_apply.sh
+
 echo "OK: all e2e tests passed"
