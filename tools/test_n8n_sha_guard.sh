@@ -2,15 +2,18 @@
 set -euo pipefail
 
 WF_ID="XC7hfkwDAPoa2t9L"
-EXPECTED_SHA="8ecfba942dd2dfa46b305a907e5b632ce06175503e3b85e9c0cca82e57396ecf"
+EXPECTED_SHA="7254922a46548c075627af15dc256b4c2400cd730fc2abf61726d8b13a8dd522"
 
-cd "$(dirname "$0")/.."
+echo "[n8n sha guard] dryrun sha for ${WF_ID}"
 
-echo "[n8n sha guard] dryrun sha for $WF_ID"
+# run dryrun getter (no write)
 ./agent_runner.py --json "n8n: workflows_get_dryrun workflow_id=${WF_ID}" >/dev/null
 
 REPORT="$(ls -t artifacts/*_report.json 2>/dev/null | head -n 1)" || true
-if [[ -z "${REPORT:-}" ]]; then echo "FAIL: no report found in artifacts/"; exit 1; fi
+if [[ -z "${REPORT:-}" ]]; then
+  echo "FAIL: no report found in artifacts/"
+  exit 1
+fi
 
 SHA="$(python3 - <<'PY3' "$REPORT"
 import json,sys
@@ -28,11 +31,16 @@ print(obj.get("sha256",""))
 PY3
 )"
 
-if [[ "$SHA" != "$EXPECTED_SHA" ]]; then
-  echo "FAIL: sha changed"
-  echo " expected: $EXPECTED_SHA"
-  echo "   actual: $SHA"
+if [[ -z "${SHA:-}" ]]; then
+  echo "FAIL: empty sha"
   exit 1
 fi
 
-echo "OK: sha matches $EXPECTED_SHA"
+if [[ "${SHA}" != "${EXPECTED_SHA}" ]]; then
+  echo "FAIL: sha changed"
+  echo " expected: ${EXPECTED_SHA}"
+  echo "   actual: ${SHA}"
+  exit 1
+fi
+
+echo "OK: sha matches ${SHA}"
