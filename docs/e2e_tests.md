@@ -34,3 +34,8 @@ E2E = end-to-end: проверяем, что Brain + Runner + Hand v2 реаль
 
 - `tools/test_n8n_sha_guard.sh` — делает `n8n: workflows_get_dryrun` и сравнивает sha256 с ожидаемым.
 - Этот тест включён в общий прогон `tools/test_e2e.sh`.
+
+## 2026-02-04 — E2E PASS
+- all fix APPLY OK → all status OK (sites 7/7 up, blocked=0)
+- disk quickcheck OK; server+n8n OK
+- commit: d588086
