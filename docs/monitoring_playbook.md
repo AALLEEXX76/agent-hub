@@ -1,26 +1,44 @@
 # Monitoring Playbook (MVP)
 
-Цель: быстрые статусы + диагностика + безопасные автофиксы через Brain shortcuts.
+Цель: единые human-команды для статусов/диагностики/фиксов с безопасными гейтами (check/dryrun по умолчанию, apply только явно).
 
-## Команды (как пользоваться)
+## Команды (human)
 
-Статусы (SAFE):
-- monitoring: server status
-- monitoring: caddy errors since_seconds=300
-- monitoring: all status
-- monitoring: sites status
+### 1) Общий статус
+- `monitoring: all status`
+  - ожидаем: `all status OK (sites total=N up=N blocked=0 down=0 other=0)`
 
-Автофикс:
-- monitoring: all fix            (dryrun)
-- monitoring: all fix apply=1    (только с ALLOW_DANGEROUS=1)
+### 2) Сервер
+- `monitoring: server status`
+  - проверяет: `/` + `/healthz` + docker_status + ошибки Caddy за 5м
 
-E2E:
-- tools/test_e2e.sh
+### 3) Сайты
+- `monitoring: sites status`
+  - список сайтов + up/blocked/down/other (HTTP probe + docker контейнеры)
 
-Снапшот:
-- MAKE_IIBOT_SNAPSHOT=1 tools/remote_healthcheck.sh
+### 4) Диск
+- `monitoring: disk quickcheck`
+  - `df -h /` + `df -i /`
 
-## Критерий “MVP DONE”
-- Все shortcuts работают
-- E2E зелёный
-- Этот файл в git без мусора heredoc
+## Fix (авто-исправления)
+
+### 5) Общий fix
+- Dry-run:
+  - `monitoring: all fix`
+  - ожидаем: `... DRYRUN ... (would run: site: unblock name=<site> confirm=ROUTE_<SITE>) ...`
+- Apply:
+  - `monitoring: all fix apply=1`
+  - ожидаем: `all fix APPLY ... then all status OK ...`
+
+## Гейты и безопасность
+
+- Все статусы: SAFE, без confirm.
+- Любой apply, который меняет состояние (route/unblock/up/down/restart) — требует confirm токен (и где нужно — `ALLOW_DANGEROUS=1`).
+
+## Definition of Done (MVP)
+
+1) `tools/test_e2e.sh` стабильно проходит (RC=0).
+2) `monitoring: all status` стабильно OK на “здоровом” сервере.
+3) `monitoring: all fix` dryrun показывает корректные “would run …”.
+4) `monitoring: all fix apply=1` реально чинит и затем `monitoring: all status` = OK.
+5) После apply выполняется post-apply remote_healthcheck и пишет результат в artifacts report.
