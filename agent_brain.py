@@ -3203,7 +3203,7 @@ def main() -> int:
                     agent_exec_url,
                     "ssh: run",
                     chat_id,
-                    params={"action": hv2_action, "mode": mode, "args": args},
+                    params={"action": hv2_action, "mode": mode, "args": args, **({"confirm": (params or {}).get("confirm")} if (params or {}).get("confirm") else {})},
                 )
                 out_norm = normalize_exec_response("ssh: run", out_raw)
                 out = sanitize_response("ssh: run", out_norm)
@@ -3253,11 +3253,24 @@ def main() -> int:
         if reason:
             print(f"[exec #{i}] reason: {reason}")
 
+        # Gate dangerous tasks
         if task in DANGEROUS_TASKS and not allow_dangerous:
-            print(f"[exec #{i}] SKIP (dangerous). Set ALLOW_DANGEROUS=1 to allow.")
-            results.append({'task': task, 'skipped': True, 'why': 'dangerous'})
-            issue_found = True
-            continue
+            # For Hand v2 (ssh: run), allow apply when confirm token is present
+            if task == "ssh: run":
+                _mode = str((params or {}).get("mode") or "check").strip().lower()
+                _confirm = str((params or {}).get("confirm") or "").strip()
+                if _mode == "apply" and _confirm:
+                    pass
+                else:
+                    print(f"[exec #{i}] SKIP (dangerous). Set ALLOW_DANGEROUS=1 or provide confirm=TOKEN to allow apply.")
+                    results.append({"task": task, "skipped": True, "why": "dangerous"})
+                    issue_found = True
+                    continue
+            else:
+                print(f"[exec #{i}] SKIP (dangerous). Set ALLOW_DANGEROUS=1 to allow.")
+                results.append({"task": task, "skipped": True, "why": "dangerous"})
+                issue_found = True
+                continue
 
         try:
             out_raw = call_n8n(task, params) if task.startswith('n8n:') else call_agent_exec(agent_exec_url, task, chat_id)
