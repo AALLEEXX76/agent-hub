@@ -1,72 +1,84 @@
 # Playbooks Framework (MVP)
 
-Цель: единый каркас для всех “человеческих” команд агента, чтобы любой playbook работал одинаково:
-CHECK → PLAN → APPLY, с гейтами (ALLOW_DANGEROUS + confirm), понятным итогом (OK/FAIL), стабильным JSON для runner, и post-apply healthcheck.
+Цель: единый “каркас” для всех плейбуков (Site/Monitoring/Recovery/n8n/…):
+одинаковые правила безопасности, одинаковый формат команд, одинаковые критерии “готово”.
 
-## Стандарт результата (для Runner)
-Любая команда должна возвращать:
-- `ok: true|false`
-- `exit_code: 0|1`
-- `summary: "..."`
-- `report: "artifacts/..._report.json"`
+---
 
-Внутри `*_report.json`:
-- `status: OK|FAIL|BLOCKED`
-- `reason` (только если FAIL/BLOCKED)
-- `results[]` (сырьё: какие проверки/действия выполнены)
-- `next_cmd` (если есть “следующий правильный шаг”)
+## 1) Общие принципы
 
-## Единая политика безопасности
-1) Любое изменение = только через `apply`.
-2) Любой `apply` требует:
-   - `ALLOW_DANGEROUS=1` (если операция mutating/HIGH)
-   - `confirm=TOKEN` (для точечных опасных действий)
-3) Если гейт не выполнен → `BLOCKED` и `exit_code=1`.
+- **По умолчанию безопасно:** status/check/dryrun — без изменений.
+- **Изменения только явно:** `apply=1` или `mode=apply` и всегда с **confirm** (где нужно).
+- **Гейты:**
+  - `ALLOW_DANGEROUS=1` — для опасных операций (restart/up/down/pull и т.п.).
+  - `N8N_ALLOW_WRITE=1` — для записи через Public API n8n (deploy/activate).
+- **Fallback:** если webhook временно недоступен — Brain использует **SSH fallback** только для allowlist `RECOVERY_SSH_ACTIONS`.
 
-## Единые режимы
-### CHECK
-- только чтение/диагностика
-- формирует “что не так” и “что можно сделать”
-- `exit_code=0` если OK, иначе `1`
+---
 
-### PLAN
-- строит план действий (без выполнения)
-- возвращает список шагов и confirm tokens (если нужны)
-- по умолчанию `exit_code=0`, но может быть `1` если уже видно, что выполнить нельзя (например, нет доступа)
+## 2) Единый формат human-команд
 
-### APPLY
-- выполняет действия строго по плану
-- после успеха обязателен post-apply healthcheck (уже встроен в runner)
-- при любой ошибке → `ok=false`, `exit_code=1`
+- Статусы:
+  - `monitoring: ... status`
+  - `site: ...`
+- Fix:
+  - dryrun по умолчанию: `... fix`
+  - apply только явно: `... fix apply=1`
+- Опасные действия:
+  - всегда требуют `confirm=<TOKEN>` и (если HIGH) `ALLOW_DANGEROUS=1`.
 
-## Confirm tokens
-- короткие, уникальные, человекочитаемые (пример: `ROUTE_DEMO6`, `RESTART_N8N`)
-- в отчёте должны быть подсказки:
-  - `next_cmd: "... confirm=TOKEN"`
+---
 
-## Стандарты именования команд
-- `monitoring: ...`
-- `recovery: ...`
-- `site: ...`
-- `n8n: ...`
-- `vpn: ...`
+## 3) Confirm tokens (правила)
 
-## Standard fallbacks
-Если gateway/webhook недоступен:
-- для read-only можно fallback на SSH (если действие есть в Hand v2)
-- для self-ops (restart/up/down) — только recovery playbook (forced SSH fallback)
+- Токен должен быть **явным и одноразово осмысленным**: `ROUTE_DEMO6`, `RESTART_N8N`, `DOWN_<SITE>`, и т.д.
+- Не используем “YES/OK/123” — токен должен защищать от случайного apply.
 
-## Требования к playbook-докам
-Каждый `docs/*_playbook.md` содержит:
-1) цель
-2) список команд (shortcuts)
-3) какие Hand v2 actions нужны (SAFE/HIGH)
-4) гейты
-5) healthchecks
-6) минимальные E2E тесты + где они лежат
+---
 
-## TODO (следующее)
-1) Добавить единый раздел “Policy” в CLAUDE.md:
-   - гейты, confirm, exit codes, report schema
-2) Добавить `docs/report_schema.md` (минимальная спецификация структуры report.json)
-3) Добавить шаблон playbook: `docs/_template_playbook.md`
+## 4) Где что находится
+
+### На ноутбуке (WSL) — source of truth (git)
+- `~/agent-hub/agent_runner.py` — запускает Brain, пишет artifacts, post-apply healthcheck.
+- `~/agent-hub/agent_brain.py` — парсинг human-команд → вызовы webhook/ssh fallback.
+- `~/agent-hub/tools/` — утилиты (e2e, print_report, remote_healthcheck, n8n deploy tools).
+- `~/agent-hub/docs/` — плейбуки/доки.
+- `~/agent-hub/snapshots/INDEX.txt` — индекс снапшотов (tgz/sha256 в git НЕ храним).
+
+### На сервере — исполнение (Hand v2 + сервисы)
+- Hand v2: `/usr/local/sbin/iibotv2`, `/usr/local/lib/iibot/` (actions + manifests), audit: `/var/log/iibot/audit.jsonl`
+- n8n: `/opt/n8n` (docker compose)
+- сайты: `/opt/sites/<name>` (docker compose)
+- Caddy: `/etc/caddy/Caddyfile`
+
+---
+
+## 5) Артефакты и отчёты
+
+- Каждый запуск runner создаёт: `artifacts/YYYYMMDD-HHMMSS_report.json`
+- Для apply: runner добавляет `post_apply_healthcheck` (remote_healthcheck stdout + RID/audit match).
+
+---
+
+## 6) E2E тесты (MVP)
+
+- `tools/test_e2e.sh` должен стабильно возвращать `RC=0`.
+- Включает проверки:
+  - site block/unblock + sites fix
+  - monitoring all status/fix
+  - recovery gates (BLOCKED без ALLOW_DANGEROUS)
+  - n8n sha guard
+
+---
+
+## 7) Как добавлять новый плейбук/команду (шаблон)
+
+1) Документируем в `docs/<playbook>.md`:
+   - команды
+   - гейты/confirm
+   - definition of done
+2) Реализуем shortcut в `agent_brain.py`
+3) Добавляем/обновляем e2e тесты
+4) Прогоняем: `python3 -m py_compile ...` + `tools/test_e2e.sh`
+5) Коммит + push
+
