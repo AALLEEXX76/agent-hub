@@ -289,22 +289,35 @@ def call_agent_exec(agent_exec_url: str, task: str, chat_id: Optional[int], time
         payload["chatId"] = chat_id
     if params is not None:
         payload["params"] = params
+
     try:
-        with httpx.Client(timeout=timeout_s) as client:
+        # http2=False to reduce rare empty/truncated-body issues we observed with JSON decode
+        with httpx.Client(timeout=timeout_s, http2=False, follow_redirects=True) as client:
             r = client.post(agent_exec_url, json=payload)
-            r.raise_for_status()
+
+        body = (r.text or "")
+        if not (200 <= r.status_code < 300):
+            msg = f"agent-exec http {r.status_code}: {body[:500]}"
+            raise RuntimeError(msg)
+
+        if not body.strip():
+            raise RuntimeError("agent-exec empty response body")
+
+        try:
             return r.json()
+        except Exception:
+            return json.loads(body)
+
     except Exception as ex:
         # Recovery SSH fallback (only for ssh: run + allowlisted actions)
         if task == "ssh: run" and isinstance(params, dict):
             action = str(params.get("action", "")).strip()
             if action and action in _ssh_fallback_actions():
                 print(f"[recovery] webhook unavailable, using ssh fallback for action={action}", file=sys.stderr)
-
                 return _call_handv2_via_ssh(params)
+
         msg = f"agent-exec call failed: {ex}"
         return {"ok": False, "action": task, "stdout": "", "stderr": msg, "text": msg, "exit_code": 1}
-
 def _n8n_allowlist() -> set[str]:
     raw = os.environ.get("N8N_ALLOW_WORKFLOW_IDS", "")
     return {x.strip() for x in raw.split(",") if x.strip()}
