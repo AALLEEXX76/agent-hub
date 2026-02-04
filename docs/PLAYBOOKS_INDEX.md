@@ -40,7 +40,16 @@
 - гейты (ALLOW_DANGEROUS / confirm / allowlists)
 - post-apply healthcheck + артефакты
 
-## 5) Site / VPN Playbooks
+## 5) Site Playbook (MVP)
+Файл: `docs/site_playbook.md`
+Команды:
+- `site: list`
+- `site: status name=<site>`
+- `site: block name=<site> confirm=ROUTE_<SITE>` / `site: unblock name=<site> confirm=ROUTE_<SITE>`
+- `site: up name=<site> confirm=UP_<SITE>` / `site: down name=<site> confirm=DOWN_<SITE>`
+- `site: init name=<site> port=<port> domain=<domain> confirm=INIT_<SITE>`
+
+## 6) Site / VPN Playbooks
 Файлы:
 - `docs/e2e_tests.md` — E2E smoke-tests и критерии “готово”
 - `docs/vpn_playbook.md` — VPN (позже, на отдельном сервере)
