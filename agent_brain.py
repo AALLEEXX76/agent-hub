@@ -186,7 +186,7 @@ def extract_json(s: str) -> Dict[str, Any]:
 def validate_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     # --- Hand v2 hardening (manifests-only actions) ---
     # relies on global handv2_index built via index_handv2_manifests(...)
-    hv2_allowed = set((handv2_index or {}).keys())
+    hv2_allowed = set((globals().get('handv2_index') or {}).keys())
     def _fail(msg: str) -> None:
         raise ValueError(msg)
 
@@ -3114,7 +3114,7 @@ def main() -> int:
     if chat_id:
         print(f"[brain] TG_CHAT_ID={chat_id}")
 
-    plan = plan_with_claude(client, model, user_task, handv2_actions=sorted((handv2_index or {}).keys()))
+    plan = plan_with_claude(client, model, user_task, handv2_actions=sorted((globals().get("handv2_index") or {}).keys()))
 
     summary = plan.get("summary", "")
     finish = plan.get("finish", {}) if isinstance(plan.get("finish"), dict) else {}
