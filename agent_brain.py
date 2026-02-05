@@ -184,6 +184,26 @@ def extract_json(s: str) -> Dict[str, Any]:
 
 
 def validate_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # --- Hand v2 hardening (manifests-only actions) ---
+    # relies on global handv2_index built via index_handv2_manifests(...)
+    hv2_allowed = set((handv2_index or {}).keys())
+    def _fail(msg: str) -> None:
+        raise ValueError(msg)
+
+    # validate each action entry
+    for a in (plan or {}).get("actions", []) or []:
+        task = a.get("task")
+        params = a.get("params") or {}
+        # forbid confirm inside args (must be top-level params.confirm)
+        if task == "ssh: run":
+            args = (params.get("args") or {})
+            if isinstance(args, dict) and ("confirm" in args):
+                _fail("confirm must be params.confirm (not inside params.args)")
+            act = params.get("action")
+            if hv2_allowed and act and (act not in hv2_allowed):
+                _fail(f"unknown Hand v2 action for ssh: run: {act}")
+    # --- end Hand v2 hardening ---
+
     actions = plan.get("actions")
     if not isinstance(actions, list) or not actions:
         raise ValueError("Plan must contain non-empty 'actions' list.")
