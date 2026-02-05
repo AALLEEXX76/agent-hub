@@ -3114,7 +3114,12 @@ def main() -> int:
     if chat_id:
         print(f"[brain] TG_CHAT_ID={chat_id}")
 
-    plan = plan_with_claude(client, model, user_task, handv2_actions=sorted((globals().get("handv2_index") or {}).keys()))
+    plan = None
+    if isinstance(user_task, str) and user_task.lstrip().startswith('PLAN_JSON:'):
+        _raw = user_task.split('PLAN_JSON:', 1)[1]
+        plan = extract_json(_raw)
+    else:
+        plan = plan_with_claude(client, model, user_task, handv2_actions=sorted((globals().get("handv2_index") or {}).keys()))
 
     summary = plan.get("summary", "")
     finish = plan.get("finish", {}) if isinstance(plan.get("finish"), dict) else {}
