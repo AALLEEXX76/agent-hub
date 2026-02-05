@@ -516,11 +516,18 @@ def call_n8n(task: str, params: Dict[str, Any]) -> Dict[str, Any]:
         return req("GET", f"/workflows/{wid}")
 
     return {"ok": False, "action": task, "stdout": "", "stderr": f"Unsupported n8n task: {task}", "text": f"Unsupported n8n task: {task}", "exit_code": 1}
-def plan_with_claude(client: Anthropic, model: str, user_task: str) -> Dict[str, Any]:
+def plan_with_claude(client: Anthropic, model: str, user_task: str, handv2_actions: Optional[List[str]] = None) -> Dict[str, Any]:
+    hv2_actions = sorted(handv2_actions or [])
+    hv2_list = "\n".join(["- " + a for a in hv2_actions]) if hv2_actions else "(no manifests cache)"
+
     system = (
         "Ты — планировщик действий для DevOps-агента. "
         "Твоя задача: превратить запрос пользователя в минимальный безопасный план действий.\n\n"
         "СТРОГОЕ ТРЕБОВАНИЕ: верни ТОЛЬКО валидный JSON-объект, без markdown и без пояснений вокруг.\n\n"
+        "Разрешённые Hand v2 actions (ТОЛЬКО для ssh: run params.action):\n"
+        f"{hv2_list}\n\n"
+        "СТРОГО: если используешь ssh: run — params.action ДОЛЖЕН быть из списка выше. Нельзя придумывать action.\n"
+        "СТРОГО: confirm ТОЛЬКО как params.confirm (НЕ внутри args).\n\n"
         "Разрешённые действия (task):\n"
         "- ssh: docker_status\n"
         "- ssh: run\n"
@@ -3087,7 +3094,7 @@ def main() -> int:
     if chat_id:
         print(f"[brain] TG_CHAT_ID={chat_id}")
 
-    plan = plan_with_claude(client, model, user_task)
+    plan = plan_with_claude(client, model, user_task, handv2_actions=sorted((handv2_index or {}).keys()))
 
     summary = plan.get("summary", "")
     finish = plan.get("finish", {}) if isinstance(plan.get("finish"), dict) else {}
