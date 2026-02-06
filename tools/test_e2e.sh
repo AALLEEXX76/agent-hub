@@ -21,4 +21,8 @@ echo "[extra] monitoring shortcuts (expect OK)"
 echo "[extra] monitoring: all fix apply=1 (expect OK)"
 ./tools/test_monitoring_all_fix_apply.sh
 
+
+echo "[extra] humanmode LLM guard (expect OK)"
+./tools/test_humanmode_llm_guard.sh
+
 echo "OK: all e2e tests passed"
