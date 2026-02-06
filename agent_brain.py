@@ -186,23 +186,38 @@ def extract_json(s: str) -> Dict[str, Any]:
 def validate_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     # --- Hand v2 hardening (manifests-only actions) ---
     # relies on global handv2_index built via index_handv2_manifests(...)
-    hv2_allowed = set((globals().get('handv2_index') or {}).keys())
+    hv2_allowed = set((globals().get("handv2_index") or {}).keys())
     def _fail(msg: str) -> None:
         raise ValueError(msg)
 
-    # validate each action entry
     for a in (plan or {}).get("actions", []) or []:
+        if not isinstance(a, dict):
+            _fail("each action must be an object")
         task = a.get("task")
         params = a.get("params") or {}
-        # forbid confirm inside args (must be top-level params.confirm)
+
         if task == "ssh: run":
-            args = (params.get("args") or {})
-            if isinstance(args, dict) and ("confirm" in args):
-                _fail("confirm must be params.confirm (not inside params.args)")
+            # fail-fast: ssh: run is forbidden unless Hand v2 manifests index is loaded
+            if not hv2_allowed:
+                _fail("Hand v2 manifests index not loaded; refuse ssh: run")
+            if not isinstance(params, dict):
+                _fail("ssh: run params must be an object")
+
             act = params.get("action")
-            if hv2_allowed and act and (act not in hv2_allowed):
+            if not isinstance(act, str) or not act.strip():
+                _fail("ssh: run requires params.action (non-empty string)")
+            if act not in hv2_allowed:
                 _fail(f"unknown Hand v2 action for ssh: run: {act}")
+
+            args = params.get("args") or {}
+            if not isinstance(args, dict):
+                _fail("ssh: run params.args must be an object")
+            if "confirm" in args:
+                _fail("confirm must be params.confirm (not inside params.args)")
+            if "confirm" in params and not isinstance(params.get("confirm"), str):
+                _fail("params.confirm must be a string when provided")
     # --- end Hand v2 hardening ---
+
 
     actions = plan.get("actions")
     if not isinstance(actions, list) or not actions:
