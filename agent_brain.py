@@ -186,7 +186,11 @@ def extract_json(s: str) -> Dict[str, Any]:
 def validate_plan(plan: Dict[str, Any]) -> List[Dict[str, Any]]:
     # --- Hand v2 hardening (manifests-only actions) ---
     # relies on global handv2_index built via index_handv2_manifests(...)
-    hv2_allowed = set((globals().get("handv2_index") or {}).keys())
+    hv2_idx = globals().get("handv2_index") or {}
+    if not hv2_idx:
+        hv2_idx = index_handv2_manifests(load_handv2_manifests_cache() or [])
+        globals()["handv2_index"] = hv2_idx
+    hv2_allowed = set(hv2_idx.keys())
     def _fail(msg: str) -> None:
         raise ValueError(msg)
 
