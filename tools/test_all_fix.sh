@@ -5,6 +5,9 @@ name="${1:-demo6}"
 token_name="${name^^}"
 token_name="${token_name//-/_}"
 
+echo "[0/4] ensure $name is unblocked (idempotent pre-step)"
+ALLOW_DANGEROUS=1 ./agent_runner.py --json "monitoring: all fix apply=1" >/dev/null || true
+
 echo "[1/4] block $name (expect 404)"
 ALLOW_DANGEROUS=1 ./agent_runner.py --json "site: block name=$name confirm=BLOCK_${token_name}_ALLFIX_TEST" >/dev/null
 
