@@ -21,3 +21,16 @@ Brain должен уйти в SSH fallback (allowlist) и выполнить в
 - https://ii-bot-nout.ru/ -> 200
 - webhook list_actions отвечает
 - в /var/log/iibot/audit.jsonl есть запись по request_id
+
+## Проверки (быстро)
+- `./agent_runner.py --json "monitoring: server status"`
+- `./agent_runner.py --json "monitoring: all status"`
+- `./agent_runner.py --json "recovery: all fix"`
+
+## Типовые сценарии
+### 1) webhook 502 / n8n лежит
+Ожидаем: Brain уходит в SSH fallback (allowlist) и выполняет восстановление.
+
+### 2) apply заблокирован
+Если `apply=1` без `ALLOW_DANGEROUS=1` — должен быть BLOCKED и exit_code=1.
+
