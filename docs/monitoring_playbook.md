@@ -1,23 +1,33 @@
 # Monitoring Playbook (MVP)
 
-Цель: быстрый статус -> безопасный dry-run fix -> apply fix (с гейтами).
+Цель: быстрые проверки "что сломалось" + безопасные фиксы через shortcuts (dryrun→apply) с понятным summary и exit_code.
 
-## Команды
+## Команды (ноутбук, WSL)
 
-### 1) Общий статус
-./agent_runner.py --json "monitoring: all status"
-
-### 2) Общий dry-run fix (ничего не меняет)
-./agent_runner.py --json "monitoring: all fix"
-
-### 3) Общий apply fix (меняет, требует гейтов/confirm там где нужно)
-./agent_runner.py --json "monitoring: all fix apply=1"
-
-### 4) Статус сайтов
-./agent_runner.py --json "monitoring: sites status"
-
-### 5) Статус сервера
+### 1) Быстрый статус сервера
 ./agent_runner.py --json "monitoring: server status"
 
-## Правило
-Всегда делай: status -> fix (dryrun) -> fix apply=1 (если нужно).
+### 2) Ошибки Caddy за 5 минут
+./agent_runner.py --json "monitoring: caddy errors since_seconds=300"
+
+### 3) Статус сайтов
+./agent_runner.py --json "monitoring: sites status"
+
+### 4) Общий статус (one-shot)
+./agent_runner.py --json "monitoring: all status"
+
+### 5) Общий fix (dryrun / apply)
+./agent_runner.py --json "monitoring: all fix"
+./agent_runner.py --json "monitoring: all fix apply=1"
+
+### 6) Zabbix
+./agent_runner.py --json "monitoring: zabbix quickcheck"
+./agent_runner.py --json "monitoring: zabbix agent info"
+
+## Правила
+- Любые изменения: `apply=1`
+- Опасные изменения: `ALLOW_DANGEROUS=1` + `confirm=TOKEN`
+
+## Критерий OK
+- summary содержит OK
+- exit_code=0
