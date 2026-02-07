@@ -49,7 +49,7 @@ if not isinstance(d, dict):
     raise SystemExit("unsupported JSON shape")
 
 # Keep only fields n8n API expects for update
-keep = {"name","nodes","connections","settings","staticData","pinData","meta"}
+keep = {"name","nodes","connections","settings"}
 payload = {k: d[k] for k in keep if k in d}
 
 # minimal sanity
