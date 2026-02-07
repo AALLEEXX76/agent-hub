@@ -25,4 +25,8 @@ echo "[extra] monitoring: all fix apply=1 (expect OK)"
 echo "[extra] humanmode LLM guard (expect OK)"
 ./tools/test_humanmode_llm_guard.sh
 
+
+
+echo "[extra] n8n deploy dryrun (expect OK)"
+./tools/test_n8n_deploy_dryrun.sh
 echo "OK: all e2e tests passed"
