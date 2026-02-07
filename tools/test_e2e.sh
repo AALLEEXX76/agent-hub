@@ -29,4 +29,8 @@ echo "[extra] humanmode LLM guard (expect OK)"
 
 echo "[extra] n8n deploy dryrun (expect OK)"
 ./tools/test_n8n_deploy_dryrun.sh
+
+
+echo "[extra] n8n deploy flow dryrun (expect OK)"
+./tools/test_n8n_deploy_flow_dryrun.sh
 echo "OK: all e2e tests passed"
