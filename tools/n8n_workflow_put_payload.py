@@ -3,7 +3,7 @@ import json, sys
 from pathlib import Path
 
 KEEP = ("name", "nodes", "connections", "settings")
-OPTIONAL = ("staticData", "tags", "shared", "active", "createdAt", "updatedAt", "id")
+OPTIONAL = ("staticData", "tags", "shared", "active", "createdAt", "updatedAt")
 
 def load_json(p: Path):
     data = json.loads(p.read_text(encoding="utf-8"))
