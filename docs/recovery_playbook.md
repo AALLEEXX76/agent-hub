@@ -34,3 +34,8 @@ Brain должен уйти в SSH fallback (allowlist) и выполнить в
 ### 2) apply заблокирован
 Если `apply=1` без `ALLOW_DANGEROUS=1` — должен быть BLOCKED и exit_code=1.
 
+
+### Проверка SSH fallback (эмуляция webhook 502)
+AGENT_EXEC_URL=https://ii-bot-nout.ru/webhook/agent-exec__bad ./agent_runner.py --json "recovery: all fix"
+
+Ожидаем: request_id вида `rq_sshfb_...` в отчёте.
