@@ -1,43 +1,23 @@
-# Recovery / Self-Ops Playbook (MVP)
+# Recovery Playbook (MVP)
 
-Цель: чтобы агент мог **восстанавливаться и чинить критичные вещи**, даже если webhook/n8n временно недоступен (SSH fallback + жёсткие гейты).
+Цель: восстановление, когда webhook/n8n недоступен, и быстрые проверки после фикса.
 
-## Принципы
+## Команды (ноутбук, WSL)
 
-- По умолчанию: **check / dryrun** (без изменений).
-- Любой **apply**: только явно + гейты.
-- При падении webhook: Brain использует **SSH fallback** (только allowlist действий).
+### 1) Dry-run общий recovery
+./agent_runner.py --json "recovery: all fix"
 
-## Команды (human)
+### 2) Apply recovery (опасно: требует ALLOW_DANGEROUS=1)
+ALLOW_DANGEROUS=1 ./agent_runner.py --json "recovery: all fix apply=1"
 
-### 1) Общий recovery-fix
+### 3) Перезапуск n8n (проверка / apply)
+./agent_runner.py --json "recovery: n8n restart"
+ALLOW_DANGEROUS=1 ./agent_runner.py --json "recovery: n8n restart apply=1"
 
-- Dry-run:
-  - `recovery: all fix`
-  - ожидаем: `... DRYRUN ...` (что *было бы* сделано)
+## Если webhook лежит (502)
+Brain должен уйти в SSH fallback (allowlist) и выполнить восстановление по SSH.
 
-- Apply:
-  - `recovery: all fix apply=1 confirm=<TOKEN>`
-  - ожидаем: если нет гейтов → `BLOCKED`, если гейты включены → выполнит fix и даст итоговый статус
-
-### 2) Recovery: n8n restart
-
-- Check:
-  - `recovery: n8n restart`
-  - ожидаем: OK (без рестарта, только проверка/план)
-
-- Apply:
-  - `recovery: n8n restart apply=1 confirm=<TOKEN>`
-  - ожидаем: если нет гейтов → `BLOCKED`, если гейты включены → рестарт и post-apply healthcheck
-
-## Гейты и безопасность
-
-- Любой `apply=1` в recovery требует:
-  - `ALLOW_DANGEROUS=1`
-  - `confirm=<TOKEN>` (явное подтверждение)
-
-## Definition of Done (MVP)
-
-1) `tools/test_e2e.sh` проходит (есть проверки на BLOCKED-гейты для recovery apply).
-2) SSH fallback работает только для allowlist действий (RECOVERY_SSH_ACTIONS).
-3) После успешного apply выполняется post-apply remote_healthcheck и пишет результат в artifacts report.
+## Критерий OK
+- https://ii-bot-nout.ru/ -> 200
+- webhook list_actions отвечает
+- в /var/log/iibot/audit.jsonl есть запись по request_id
