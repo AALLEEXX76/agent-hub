@@ -1242,6 +1242,53 @@ def main() -> int:
             print(_json.dumps(out, ensure_ascii=False))
             raise SystemExit(0 if ok else 1)
 
+
+        # monitoring: audit last=20 -> Hand v2 monitoring_audit (short OK/FAIL + counts)
+        if _tl.startswith("monitoring:") and ("monitoring: audit" in _tl or "monitoring:audit" in _tl or "monitoring_audit" in _tl):
+            import json as _json, re as _re
+
+            mm = _re.search(r"\blast\s*=\s*(\d+)", _tl)
+            last = int(mm.group(1)) if mm else 20
+            if last < 1:
+                last = 1
+            if last > 500:
+                last = 500
+
+            resp = _call_ssh_action("monitoring_audit", {"last": last})
+
+            ok = bool(resp.get("ok"))
+            items = []
+            arts = resp.get("artifacts") or []
+            if isinstance(arts, list):
+                for a in arts:
+                    if isinstance(a, dict) and a.get("name") == "audit" and isinstance(a.get("value"), list):
+                        items = a.get("value")
+                        break
+
+            ok_count = 0
+            fail_count = 0
+            for it in (items or []):
+                if isinstance(it, dict) and it.get("ok") is True:
+                    ok_count += 1
+                elif isinstance(it, dict) and it.get("ok") is False:
+                    fail_count += 1
+
+            status = "OK" if ok else "FAIL"
+            summary = f"audit {status} (last={last} ok={ok_count} fail={fail_count})"
+            print(f"[plan] summary: {summary}")
+
+            out = {
+                "ok": ok,
+                "status": status,
+                "summary": summary,
+                "request_id": resp.get("request_id"),
+                "counts": {"ok": int(ok_count), "fail": int(fail_count), "total": int(len(items or []))},
+                "audit": items,
+            }
+            print(_json.dumps(out, ensure_ascii=False))
+            raise SystemExit(0 if ok else 1)
+
+
 # 1) monitoring: zabbix quickcheck  -> Hand v2 zabbix_quickcheck (verbose JSON)
 
         if _tl.startswith("monitoring:") and ("zabbix quickcheck" in _tl or "zabbix_quickcheck" in _tl):
