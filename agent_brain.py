@@ -1245,7 +1245,7 @@ def main() -> int:
 
         # monitoring: audit last=20 -> Hand v2 monitoring_audit (short OK/FAIL + counts)
         if _tl.startswith("monitoring:") and ("monitoring: audit" in _tl or "monitoring:audit" in _tl or "monitoring_audit" in _tl):
-            import json as _json, re as _re
+            import json as _json, re as _re, subprocess
 
             mm = _re.search(r"\blast\s*=\s*(\d+)", _tl)
             last = int(mm.group(1)) if mm else 20
@@ -1254,27 +1254,47 @@ def main() -> int:
             if last > 500:
                 last = 500
 
-            resp = _call_ssh_action("monitoring_audit", {"last": last})
+            mf = _re.search(r"\bonly_fail\s*=\s*([A-Za-z0-9_]+)", _tl)
+            only_fail = False
+            if mf:
+                v = mf.group(1).strip().lower()
+                only_fail = v in {"1","true","yes","on"}
+
+            resp = _call_ssh_action("monitoring_audit", {"last": last, "only_fail": only_fail})
+
+            # fallback: if request_id/artifacts missing, call Hand v2 directly via SSH
+            if (not resp.get("request_id")) or (not resp.get("artifacts")):
+                try:
+                    payload = _json.dumps({"task":"ssh: run","params":{"action":"monitoring_audit","mode":"check","args":{"last": last, "only_fail": only_fail}}}, ensure_ascii=False)
+                    p2 = subprocess.run(
+                        ["ssh","ii-bot-nout","/usr/local/sbin/iibotv2"],
+                        input=payload,
+                        text=True,
+                        capture_output=True,
+                        timeout=30
+                    )
+                    if p2.returncode == 0 and (p2.stdout or "").strip():
+                        last_line = (p2.stdout or "").strip().splitlines()[-1]
+                        r2 = _json.loads(last_line)
+                        resp = normalize_exec_response("ssh: run", r2)
+                except Exception:
+                    pass
 
             ok = bool(resp.get("ok"))
             items = []
             arts = resp.get("artifacts") or []
             if isinstance(arts, list):
-                for a in arts:
-                    if isinstance(a, dict) and a.get("name") == "audit" and isinstance(a.get("value"), list):
-                        items = a.get("value")
+                for a2 in arts:
+                    if isinstance(a2, dict) and a2.get("name") == "audit" and isinstance(a2.get("value"), list):
+                        items = a2.get("value")
                         break
 
-            ok_count = 0
-            fail_count = 0
-            for it in (items or []):
-                if isinstance(it, dict) and it.get("ok") is True:
-                    ok_count += 1
-                elif isinstance(it, dict) and it.get("ok") is False:
-                    fail_count += 1
+            ok_count = sum(1 for it in (items or []) if isinstance(it, dict) and it.get("ok") is True)
+            fail_count = sum(1 for it in (items or []) if isinstance(it, dict) and it.get("ok") is False)
 
             status = "OK" if ok else "FAIL"
-            summary = f"audit {status} (last={last} ok={ok_count} fail={fail_count})"
+            extra = " only_fail=true" if only_fail else ""
+            summary = f"audit {status} (last={last}{extra} ok={ok_count} fail={fail_count})"
             print(f"[plan] summary: {summary}")
 
             out = {
