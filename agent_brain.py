@@ -725,6 +725,30 @@ def validate_handv2_args(action: str, args: Any, manifests: Optional[List[Dict[s
             if not isinstance(v, bool):
                 return f"arg '{k}' must be boolean"
 
+
+        elif t == "number":
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                return f"arg '{k}' must be number"
+            mn = spec.get("minimum")
+            mx = spec.get("maximum")
+            if isinstance(mn, (int, float)) and v < mn:
+                return f"arg '{k}' must be >= {mn}"
+            if isinstance(mx, (int, float)) and v > mx:
+                return f"arg '{k}' must be <= {mx}"
+
+        elif t == "array":
+            if not isinstance(v, list):
+                return f"arg '{k}' must be array"
+
+        elif t == "object":
+            if not isinstance(v, dict):
+                return f"arg '{k}' must be object"
+
+        enum = spec.get("enum")
+        if isinstance(enum, list) and enum:
+            if v not in enum:
+                return f"arg '{k}' must be one of: {enum}"
+
     return None
 
 
