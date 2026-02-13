@@ -140,7 +140,6 @@ ALLOWED_TASKS = {
     "n8n: workflows_update_dryrun",
     "n8n: workflows_get_dryrun",
     "n8n: executions_list",
-    "ssh: compose_ps",
 }
 DANGEROUS_TASKS = {"ssh: restart_n8n"}
 
@@ -590,7 +589,6 @@ def plan_with_claude(client: Anthropic, model: str, user_task: str, handv2_actio
         "- Делай МИНИМУМ действий, которые реально нужны.\n"
         "- НИКОГДА не возвращай пустой actions: минимум 1 действие всегда.\n"
         "- Если пользователь просит WRITE, но N8N_ALLOW_WRITE=0: предложи только read-only \"n8n: workflows_get\" (с params.workflow_id) и в finish.message объясни, что WRITE заблокирован.\n"
-        "- Для docker compose ps используй ТОЛЬКО task \"ssh: compose_ps\" (без params), он по умолчанию проверяет проект \"/opt/n8n\".\n"
         "- Для task \"ssh: run\" поле params ОБЯЗАТЕЛЬНО: {\\\"action\\\":...,\\\"mode\\\":\\\"check|plan|apply\\\",\\\"args\\\":{...}}.\n"
         "- Для docker compose ps используй ТОЛЬКО task \"ssh: run\" с params: {\\\"action\\\":\\\"compose_ps\\\",\\\"mode\\\":\\\"check\\\",\\\"args\\\":{\\\"project_dir\\\": \\\"/opt/n8n\\\"}}. Если путь указан пользователем — подставь его в args.project_dir.\n"
         "- Не придумывай новые task.\n"
