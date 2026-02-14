@@ -2,7 +2,7 @@
 set -euo pipefail
 
 WF_ID="XC7hfkwDAPoa2t9L"
-EXPECTED_SHA="63a36be02888283041a9f443609a1191010807bf6083ac6f3243fb13f61abd6c"
+EXPECTED_SHA="2e9df40e389cb0dd26f2f0359545e820061a3ffb37d2b6feba66194bc2cbd972"
 
 echo "[n8n sha guard] dryrun sha for ${WF_ID}"
 
