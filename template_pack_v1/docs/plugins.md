@@ -10,11 +10,11 @@
 ## Нужно выбрать (TBD, но уже зарезервировано место)
 ### Cookie consent (режим 1A + блокировка тегов до согласия)
 - Требования: кнопки Accept / Deny / Customize, категории Necessary/Analytics/Marketing, совместимость с GTM Consent Mode.
-- Выбор плагина: TBD
+- Выбор плагина: **Complianz — GDPR/CCPA Cookie Consent** (поддержка Consent Mode, категории cookies)
 
 ### GTM внедрение
 - Требования: поддержка Consent Mode, удобная вставка контейнера.
-- Выбор: TBD (плагин или header injection)
+- Выбор: **Google Tag Manager for WordPress (GTM4WP)**
 
 ### GA4 + Яндекс.Метрика (через GTM)
 - Реализация: через GTM теги, запуск только после согласия.
