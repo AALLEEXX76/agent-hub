@@ -1,0 +1,74 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - wp_html:/var/www/html:ro
+    depends_on:
+      - wordpress
+      - referral-api
+
+  wordpress:
+    image: wordpress:php8.2-fpm
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      WORDPRESS_DB_HOST: mariadb:3306
+      WORDPRESS_DB_NAME: ${DB_NAME}
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASS}
+    volumes:
+      - wp_html:/var/www/html
+      - ../wp-content:/var/www/html/wp-content
+    depends_on:
+      - mariadb
+
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASS}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+  referral-api:
+    image: ghcr.io/yourorg/referral-api:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://referral:referral@postgres:5432/referral
+      STORE_API_KEY: ${REFERRAL_STORE_API_KEY}
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: referral
+      POSTGRES_USER: referral
+      POSTGRES_PASSWORD: referral
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  wp_html:
+  mariadb_data:
+  postgres_data:

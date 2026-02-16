@@ -1,0 +1,18 @@
+{$SITE_DOMAIN} {
+    encode gzip
+
+    # WordPress (php-fpm)
+    root * /var/www/html
+    php_fastcgi wordpress:9000
+    file_server
+
+    # Referral Service API (public path)
+    handle_path /ref/* {
+        reverse_proxy referral-api:8080
+    }
+
+    # (Optional) Referral Admin UI path (if we expose it)
+    # handle_path /ref-admin/* {
+    #     reverse_proxy referral-api:8080
+    # }
+}
