@@ -1,0 +1,49 @@
+{
+  "name": "TURBO SHELL: run via SSH",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "turbo-shell",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      },
+      "id": "WebhookIn",
+      "name": "in",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        360,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "={{$json.body.cmd || $json.cmd}}"
+      },
+      "id": "SshExec",
+      "name": "ssh",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        600,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "in": {
+      "main": [
+        [
+          {
+            "node": "ssh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {}
+}
