@@ -31,3 +31,5 @@ snapshots/*.sha256
 # keep snapshots index tracked (archives stay local)
 snapshots/*
 !snapshots/INDEX.txt
+!snapshots/*.sha256
+!snapshots/*.tgz.sha256
