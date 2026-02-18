@@ -33,4 +33,10 @@ echo "[extra] n8n deploy dryrun (expect OK)"
 
 echo "[extra] n8n deploy flow dryrun (expect OK)"
 ./tools/test_n8n_deploy_flow_dryrun.sh
-echo "OK: all e2e tests passed"
+echo "
+# [extra] turbo edge guard (expect OK)
+export TURBO_URL="${URL:-https://ii-bot-nout.ru/webhook/turbo-shell-dpuKB6mOPYWgohHN}" TURBO_TOKEN="${TOKEN:-}"
+./tools/test_turbo_edge_guard.sh
+echo "OK: turbo edge guard passed"
+
+OK: all e2e tests passed"
