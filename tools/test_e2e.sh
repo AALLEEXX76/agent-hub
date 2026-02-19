@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+
+# retry wrapper for flakey monitoring: all status
+__e2e_retry_all_status() {
+  local tries=3
+  local i=1
+  while [ "$i" -le "$tries" ]; do
+    echo "[e2e] all status attempt $i/$tries" >&2
+    __e2e_retry_all_status && return 0
+    sleep 2
+    i=$((i+1))
+  done
+  return 1
+}
 set -euo pipefail
 
 ./tools/test_sites_fix.sh

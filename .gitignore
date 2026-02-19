@@ -31,5 +31,22 @@ snapshots/*.sha256
 # keep snapshots index tracked (archives stay local)
 snapshots/*
 !snapshots/INDEX.txt
-!snapshots/*.sha256
-!snapshots/*.tgz.sha256
+
+# local junk / secrets artifacts
+except
+try:
+key=env[N8N_API_KEY]
+artifacts/
+# snapshot checksum files generated locally
+snapshots/*.sha256
+snapshots/*.tgz.sha256
+# --- local-ignore (managed) ---
+# local junk / secrets artifacts
+except
+try:
+key=env[N8N_API_KEY]
+artifacts/
+# keep snapshot tgz local, allow tracking checksums/index
+snapshots/*.tgz
+!snapshots/INDEX.txt
+# --- /local-ignore ---
